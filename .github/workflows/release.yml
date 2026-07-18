@@ -1,0 +1,113 @@
+name: release
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and release (must already exist)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        hw_version: [hw1, hw2]
+        br_config:
+          [3do, cdi, dreamcast, gamecube, gbahd, genesis, jaguar, jvs_arcade, n64, nes,
+          parallel_1p, parallel_1p_3v3, parallel_2p, parallel_2p_3v3, pc_engine, pcfx,
+          playstation, saturn, snes, universal, virtualboy, wii_extension]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/darthcloud/idf-blueretro:v5.5.0_2024-12-02
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+        ref: ${{ github.event.inputs.tag || github.ref }}
+    - name: Build with ESP-IDF
+      shell: bash
+      run: |
+        . $IDF_PATH/export.sh
+        rm -fr build
+        echo "$(git describe --always --tags --dirty) ${{ matrix.hw_version }} ${{ matrix.br_config }}" | cut -c -31 > version.txt
+        cat version.txt
+        cp configs/${{ matrix.hw_version }}/${{ matrix.br_config }} sdkconfig
+        BR_HW=_${{ matrix.hw_version }} BR_SYS=_${{ matrix.br_config }} idf.py reconfigure build
+    - name: Stage artifact
+      shell: bash
+      run: |
+        mkdir -p out/${{ matrix.hw_version }}_${{ matrix.br_config }}
+        cp build/BlueRetro*.bin out/${{ matrix.hw_version }}_${{ matrix.br_config }}/
+        cp build/bootloader/bootloader.bin out/${{ matrix.hw_version }}_${{ matrix.br_config }}/
+        cp build/partition_table/partition-table.bin out/${{ matrix.hw_version }}_${{ matrix.br_config }}/
+        cp build/ota_data_initial.bin out/${{ matrix.hw_version }}_${{ matrix.br_config }}/
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.hw_version }}_${{ matrix.br_config }}
+        path: out/${{ matrix.hw_version }}_${{ matrix.br_config }}
+        if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: dist
+    - name: Package per hardware version
+      shell: bash
+      run: |
+        TAG="${{ github.event.inputs.tag || github.ref_name }}"
+        mkdir -p release
+        for hw in hw1 hw2; do
+          # Only archive if that hw version actually produced builds.
+          if compgen -G "dist/${hw}_*" > /dev/null; then
+            (cd dist && zip -r "../release/BlueRetro-Plus_${TAG}_${hw}.zip" ${hw}_*)
+          fi
+        done
+        # The GameCube image is what this fork exists for, so ship it loose too.
+        if [ -f dist/hw2_gamecube/BlueRetro_hw2_gamecube.bin ]; then
+          cp dist/hw2_gamecube/BlueRetro_hw2_gamecube.bin \
+             "release/BlueRetro-Plus_${TAG}_hw2_gamecube.bin"
+        fi
+        if [ -f dist/hw1_gamecube/BlueRetro_hw1_gamecube.bin ]; then
+          cp dist/hw1_gamecube/BlueRetro_hw1_gamecube.bin \
+             "release/BlueRetro-Plus_${TAG}_hw1_gamecube.bin"
+        fi
+        (cd release && sha256sum ./* > SHA256SUMS)
+        ls -l release
+    - name: Publish release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+        name: ${{ github.event.inputs.tag || github.ref_name }}
+        generate_release_notes: true
+        body: |
+          Fork of [BlueRetro](https://github.com/darthcloud/BlueRetro) with fixes for
+          the Nintendo Switch 2 / NSO GameCube controller. See the README for what
+          differs from upstream.
+
+          **Updating an existing adapter:** use the web config OTA and flash only the
+          single `BlueRetro_<hw>_<system>.bin` for your target. It writes the app
+          partition alone, preserving config, pairings and memory card data.
+
+          **Flashing a blank board:** use the full set from the matching
+          `_hw1.zip` / `_hw2.zip` (bootloader, partition table, ota_data, app) over
+          USB serial. This erases the filesystem.
+
+          `SHA256SUMS` covers every file attached here.
+        files: |
+          release/*.zip
+          release/*.bin
+          release/SHA256SUMS

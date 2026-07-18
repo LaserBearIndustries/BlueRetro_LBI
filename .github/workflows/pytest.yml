@@ -52,7 +52,10 @@ jobs:
           serial_log.txt
           coverage*
         if-no-files-found: error
+    # Coverage publishing targets darthcloud's BlueRetroCoverage repo and needs a PAT
+    # this fork does not have. Both steps are gated so the suite still runs here.
     - name: Checkout gcov pages
+      if: ${{ (github.repository == 'darthcloud/BlueRetro') }}
       uses: actions/checkout@v4
       with:
         repository: darthcloud/BlueRetroCoverage
