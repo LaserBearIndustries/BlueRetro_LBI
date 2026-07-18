@@ -887,7 +887,13 @@ static void bt_hci_cmd_le_set_scan_param_passive(void) {
     le_set_scan_param->interval = 1024;
     le_set_scan_param->window = 18;
     le_set_scan_param->addr_type = 0x00;
-    le_set_scan_param->filter_policy = 0x01;
+    /* Accept-list filtering here would hide any controller we have not paired with
+     * before. BLE has no page scan equivalent, so scanning is the only way in: with
+     * filtering on, a new BLE controller can never be discovered while another one is
+     * connected, capping the adapter at a single BLE pad. Nintendo's manufacturer data
+     * rides in the advertisement itself, so passive scanning still identifies them.
+     */
+    le_set_scan_param->filter_policy = 0x00;
 
     bt_hci_cmd(BT_HCI_OP_LE_SET_SCAN_PARAM, sizeof(*le_set_scan_param));
 }
