@@ -921,7 +921,11 @@ static void bt_hci_cmd_le_create_conn(void *bdaddr_le) {
     le_create_conn->conn_interval_min = 6;
     le_create_conn->conn_interval_max = 12;
     le_create_conn->conn_latency = 0;
-    le_create_conn->supervision_timeout = 300;
+    /* 20s. The stock 3s is not enough headroom for a second controller's full
+     * init sequence to run concurrently with an established link, so the new
+     * link times out mid-init.
+     */
+    le_create_conn->supervision_timeout = 2000;
     le_create_conn->min_ce_len = 0;
     le_create_conn->max_ce_len = 0;
 
@@ -1498,7 +1502,12 @@ void bt_hci_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                 if (device && disconn_complete->handle == device->acl_handle) {
                     printf("# DISCONN from BLE config interface\n");
                     if (atomic_test_bit(&device->flags, BT_DEV_DEVICE_FOUND)) {
-                        bt_host_reset_dev(device);
+                        /* bt_host_reset_dev() only resets entries within bt_dev[] and
+                         * returns early for bt_dev_conf, so its flags would never be
+                         * cleared and the config interface could not reconnect.
+                         */
+                        atomic_clear_bit(&device->flags, BT_DEV_DEVICE_FOUND);
+                        device->acl_handle = 0;
                         if (bt_host_get_active_dev(&device) == BT_NONE) {
                             bt_hci_cmd_le_set_adv_enable(NULL);
                         }

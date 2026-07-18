@@ -65,9 +65,14 @@ static RingbufHandle_t txq_hdl;
 static struct bt_dev bt_dev_conf = {0};
 static struct bt_dev bt_dev[BT_MAX_DEV] = {0};
 static atomic_t bt_flags = 0;
-static uint32_t frag_size = 0;
-static uint32_t frag_offset = 0;
-static uint8_t frag_buf[1024];
+/* One reassembly buffer per device, plus one extra slot at index BT_MAX_DEV for
+ * the BLE config interface (bt_dev_conf), which lives outside bt_dev[]. A single
+ * shared buffer interleaves fragments from two concurrently connected devices
+ * into one another's frames.
+ */
+static uint32_t frag_size[BT_MAX_DEV + 1] = {0};
+static uint32_t frag_offset[BT_MAX_DEV + 1] = {0};
+static uint8_t frag_buf[BT_MAX_DEV + 1][1024];
 
 static int32_t bt_host_load_bdaddr_from_nvs(void);
 static int32_t bt_host_load_keys_from_file(struct bt_host_link_keys *data);
@@ -311,26 +316,37 @@ static void bt_host_acl_hdlr(struct bt_hci_pkt *bt_hci_acl_pkt, uint32_t len) {
     struct bt_dev *device = NULL;
     struct bt_hci_pkt *pkt = bt_hci_acl_pkt;
     uint32_t pkt_len = len;
-    bt_host_get_dev_from_handle(pkt->acl_hdr.handle, &device);
+    int32_t dev_idx = bt_host_get_dev_from_handle(pkt->acl_hdr.handle, &device);
+    /* Handles we do not recognise (the BLE config interface) reassemble into the
+     * spare slot so they never share a buffer with a connected controller.
+     */
+    uint32_t frag_idx = (dev_idx < 0) ? BT_MAX_DEV : (uint32_t)dev_idx;
 
     if (bt_acl_flags(pkt->acl_hdr.handle) == BT_ACL_CONT) {
-        memcpy(frag_buf + frag_offset, (void *)pkt + BT_HCI_H4_HDR_SIZE + BT_HCI_ACL_HDR_SIZE,
-            pkt->acl_hdr.len);
-        frag_offset += pkt->acl_hdr.len;
-        if (frag_offset < frag_size) {
-            //printf("# %s Waiting for next fragment. offset: %ld size %ld\n", __FUNCTION__, frag_offset, frag_size);
+        if ((frag_offset[frag_idx] + pkt->acl_hdr.len) > sizeof(frag_buf[0])) {
+            printf("# %s frag overflow on idx %ld, dropping\n", __FUNCTION__, frag_idx);
+            frag_offset[frag_idx] = 0;
+            frag_size[frag_idx] = 0;
             return;
         }
-        pkt = (struct bt_hci_pkt *)frag_buf;
-        pkt_len = frag_size;
-        //printf("# %s process reassembled frame. offset: %ld size %ld\n", __FUNCTION__, frag_offset, frag_size);
+        memcpy(frag_buf[frag_idx] + frag_offset[frag_idx],
+            (void *)pkt + BT_HCI_H4_HDR_SIZE + BT_HCI_ACL_HDR_SIZE, pkt->acl_hdr.len);
+        frag_offset[frag_idx] += pkt->acl_hdr.len;
+        if (frag_offset[frag_idx] < frag_size[frag_idx]) {
+            return;
+        }
+        pkt = (struct bt_hci_pkt *)frag_buf[frag_idx];
+        pkt_len = frag_size[frag_idx];
     }
     if (bt_acl_flags(pkt->acl_hdr.handle) == BT_ACL_START
         && (pkt_len - (BT_HCI_H4_HDR_SIZE + BT_HCI_ACL_HDR_SIZE + sizeof(struct bt_l2cap_hdr))) < pkt->l2cap_hdr.len) {
-        memcpy(frag_buf, (void *)pkt, pkt_len);
-        frag_offset = pkt_len;
-        frag_size = pkt->l2cap_hdr.len + BT_HCI_H4_HDR_SIZE + BT_HCI_ACL_HDR_SIZE + sizeof(struct bt_l2cap_hdr);
-        //printf("# %s Detected fragmented frame start\n", __FUNCTION__);
+        if (pkt_len > sizeof(frag_buf[0])) {
+            printf("# %s frag start too large on idx %ld, dropping\n", __FUNCTION__, frag_idx);
+            return;
+        }
+        memcpy(frag_buf[frag_idx], (void *)pkt, pkt_len);
+        frag_offset[frag_idx] = pkt_len;
+        frag_size[frag_idx] = pkt->l2cap_hdr.len + BT_HCI_H4_HDR_SIZE + BT_HCI_ACL_HDR_SIZE + sizeof(struct bt_l2cap_hdr);
         return;
     }
 
