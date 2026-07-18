@@ -1,4 +1,32 @@
-**This repository has been archived and is no longer under active development or maintenance.**
+# Fork: NSO GameCube controller support
+
+**This is a fork of [darthcloud/BlueRetro](https://github.com/darthcloud/BlueRetro),
+created specifically to make the Nintendo Switch 2 / NSO GameCube controller work
+properly on a GameCube.** Upstream added Switch 2 support in `v25.10-beta` and was
+archived by its author shortly after, leaving several defects in that path unfixed.
+This fork continues from `e1a9831` (upstream's final commit).
+
+Everything else in BlueRetro is untouched. If you are not using a Switch 2 family
+controller, upstream and this fork behave identically, with one deliberate exception
+noted below for GameCube builds.
+
+## What this fork fixes
+
+| Fix | Problem it solves |
+| --- | --- |
+| **Correlate SW2 SPI read responses to their request** | The Switch 2 init state machine consumed whichever `READ_SPI` ack arrived next without checking it answered the request just made. A single duplicated or reordered ack shifted every later read by one state, storing the controller's ASCII serial number as its long-term key. That controller then failed encryption on every reconnect. This was the root cause of "only one NSO GameCube pad works". |
+| **Clear LE LTK when a link drops before HID init** | The stale-key recovery only ran on an explicit `ENCRYPT_CHANGE` failure. A controller that simply stops responding produces a supervision timeout instead, so a corrupt key was never purged and permanently locked that pad out — recoverable only by wiping the filesystem. |
+| **Do not accept-list filter the passive LE scan** | Once any device connected, LE scanning dropped to accept-list-only, hiding every not-yet-paired controller. BR/EDR pads reconnect via page scan, but BLE has no equivalent, so in practice the adapter was capped at a single BLE controller. |
+| **Fix heap overflow in debug trace block splitting** | `bt_mon_tx()` clipped its copy length at the 4 KB block boundary but then passed the *unclipped* length to a bare `memcpy`, overrunning the allocation. Debug-trace mode only. |
+| **Melee-safe combo defaults on GameCube builds** | Super Smash Bros. Melee resets a match on L+R+A+Start, which is bit-for-bit upstream's power-off combo — so every match reset also told the adapter to cut power. |
+
+All fixes were verified against ESP-IDF v5.5.0 in upstream's own CI container, with
+the QEMU pytest suite passing (92 tests) and zero compiler warnings on the GameCube,
+QEMU and N64 targets.
+
+---
+
+**Upstream notice — this repository has been archived and is no longer under active development or maintenance.**
 
 ```
 After 6 years working on BlueRetro, the time has come for me to move on
@@ -24,12 +52,7 @@ Jacques Gagnon
 <br>
 <p align="justify">BlueRetro is a multiplayer Bluetooth controllers adapter for various retro game consoles & computers. Lost or broken controllers? Reproduction too expensive? Need those rare and obscure accessories? Just use the Bluetooth devices you already got! The project is open source hardware & software under the CERN-OHL-P-2.0 & Apache-2.0 licenses respectively. It's built for the popular ESP32 chip. Wii, Switch, PS3, PS4, PS5, Xbox One, Xbox Series X|S & generic HID Bluetooth (BR/EDR & LE) devices are supported. Parallel 1P (Computers, NeoGeo, Supergun, JAMMA, Handheld, etc), Parallel 2P (Atari 2600/7800, Master System, Computers, etc), NES, PCE / TG16, Mega Drive / Genesis, SNES, CD-i, 3DO, Jaguar, Saturn, PSX, PC-FX, JVS (Arcade), Virtual Boy, N64, Dreamcast, PS2, GameCube & Wii extension are supported with simultaneous 4+ players using a single adapter.</p>
 
-## Fork notes
-
-This fork carries fixes for the Switch 2 / NSO GameCube controller and a
-GameCube-specific combo default. See the git log for detail.
-
-### GameCube builds: combo buttons differ from upstream
+## GameCube builds: combo buttons differ from upstream
 
 Super Smash Bros. Melee resets a match on **L + R + A + Start**, which is exactly
 upstream's `SYS_POWER_OFF` combo, so every match reset also tells the adapter to cut
