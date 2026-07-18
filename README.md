@@ -24,6 +24,32 @@ Jacques Gagnon
 <br>
 <p align="justify">BlueRetro is a multiplayer Bluetooth controllers adapter for various retro game consoles & computers. Lost or broken controllers? Reproduction too expensive? Need those rare and obscure accessories? Just use the Bluetooth devices you already got! The project is open source hardware & software under the CERN-OHL-P-2.0 & Apache-2.0 licenses respectively. It's built for the popular ESP32 chip. Wii, Switch, PS3, PS4, PS5, Xbox One, Xbox Series X|S & generic HID Bluetooth (BR/EDR & LE) devices are supported. Parallel 1P (Computers, NeoGeo, Supergun, JAMMA, Handheld, etc), Parallel 2P (Atari 2600/7800, Master System, Computers, etc), NES, PCE / TG16, Mega Drive / Genesis, SNES, CD-i, 3DO, Jaguar, Saturn, PSX, PC-FX, JVS (Arcade), Virtual Boy, N64, Dreamcast, PS2, GameCube & Wii extension are supported with simultaneous 4+ players using a single adapter.</p>
 
+## Fork notes
+
+This fork carries fixes for the Switch 2 / NSO GameCube controller and a
+GameCube-specific combo default. See the git log for detail.
+
+### GameCube builds: combo buttons differ from upstream
+
+Super Smash Bros. Melee resets a match on **L + R + A + Start**, which is exactly
+upstream's `SYS_POWER_OFF` combo, so every match reset also tells the adapter to cut
+power. GameCube builds therefore base the combos on `PAD_MQ` rather than `PAD_MM`
+(Start), and swap reset and power off onto A and B:
+
+| Combo | Action |
+| --- | --- |
+| L + R + Capture + A | System reset |
+| L + R + Capture + B | System power off |
+| L + R + Capture + X | Bluetooth pairing toggle |
+| L + R + Capture + Y + D-pad Up | Factory reset |
+| L + R + Capture + Y + D-pad Down | Deep sleep |
+
+`PAD_MQ` is the Capture button on a Switch 2 GameCube pad, the Capture button on a
+Switch Pro pad, and the touchpad click on a DS4/DualSense. **Controllers with no
+`PAD_MQ` — notably the Wii U Pro and PS3 pads — cannot satisfy the combo base and
+lose every combo on a GameCube build.** Remap `COMBO BASE 3` to another button in the
+web config to restore them. Non-GameCube builds keep the upstream defaults.
+
 ## READ THIS FIRST
 * [Project documentation](https://github.com/darthcloud/BlueRetro/wiki)
 

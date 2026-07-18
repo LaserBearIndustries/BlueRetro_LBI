@@ -111,9 +111,25 @@ static uint32_t config_version_magic[] = {
     CONFIG_MAGIC_V2,
     CONFIG_MAGIC_V3,
 };
+#ifdef CONFIG_BLUERETRO_SYSTEM_GC
+/* GameCube: Super Smash Bros. Melee resets a match on L+R+A+Start, which is bit for
+ * bit the stock SYS_POWER_OFF combo (MACRO_BASE = LM+RM+MM, action = RB_DOWN), so
+ * every match reset also asks the adapter to cut power. Base the combos on PAD_MQ
+ * instead of PAD_MM: no GameCube title can assert it, and on the Switch 2 GameCube
+ * pad it is the Capture button. Reset and power off also swap onto A and B, putting
+ * the more frequently wanted action on the easier button.
+ *
+ * Caveat: controllers with no PAD_MQ (Wii U Pro, PS3) cannot satisfy MACRO_BASE and
+ * lose every combo until remapped via the web config. See README.
+ */
+static uint8_t config_default_combo[BR_COMBO_CNT] = {
+    PAD_LM, PAD_RM, PAD_MQ, PAD_RB_UP, PAD_RB_DOWN, PAD_RB_RIGHT, PAD_RB_LEFT, PAD_LD_UP, PAD_LD_DOWN, PAD_MS
+};
+#else
 static uint8_t config_default_combo[BR_COMBO_CNT] = {
     PAD_LM, PAD_RM, PAD_MM, PAD_RB_UP, PAD_RB_LEFT, PAD_RB_RIGHT, PAD_RB_DOWN, PAD_LD_UP, PAD_LD_DOWN, PAD_MS
 };
+#endif
 static bool config_rst_bare_core = false;
 
 static void config_init_struct(struct config *data);
