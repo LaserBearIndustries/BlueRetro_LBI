@@ -54,6 +54,8 @@
 #define HARDCODED_SYS SEA_BOARD
 #elif defined(CONFIG_BLUERETRO_SYSTEM_SPI)
 #define HARDCODED_SYS SPI
+#elif defined(CONFIG_BLUERETRO_SYSTEM_UNIVERSAL)
+#define HARDCODED_SYS wired_adapter.system_id
 #endif
 
 struct spi_cfg {

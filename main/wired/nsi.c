@@ -23,6 +23,7 @@
 #include "system/intr.h"
 #include "system/gc_ota.h"
 #include "system/gc_app.h"
+#include "wired_bare.h"
 #include "nsi.h"
 
 #define BIT_ZERO 0x80020006
@@ -804,7 +805,7 @@ static unsigned gc_isr(unsigned cause) {
 }
 
 void nsi_init(uint32_t package) {
-    uint32_t system = (wired_adapter.system_id == N64) ? 0 : 1;
+    uint32_t system = (HARDCODED_SYS == N64) ? 0 : 1;
 
     periph_ll_enable_clk_clear_rst(PERIPH_RMT_MODULE);
 
@@ -826,7 +827,7 @@ void nsi_init(uint32_t package) {
         RMT.conf_ch[rmt_ch[i][system]].conf0.carrier_out_lv = 0;
         RMT.carrier_duty_ch[rmt_ch[i][system]].high = 0;
         RMT.carrier_duty_ch[rmt_ch[i][system]].low = 0;
-        RMT.conf_ch[rmt_ch[i][system]].conf0.idle_thres = (wired_adapter.system_id == N64) ? N64_BIT_PERIOD_TICKS : GC_BIT_PERIOD_TICKS;
+        RMT.conf_ch[rmt_ch[i][system]].conf0.idle_thres = (HARDCODED_SYS == N64) ? N64_BIT_PERIOD_TICKS : GC_BIT_PERIOD_TICKS;
         RMT.conf_ch[rmt_ch[i][system]].conf1.rx_filter_thres = 0; /* No minimum length */
         RMT.conf_ch[rmt_ch[i][system]].conf1.rx_filter_en = 0;
 
@@ -845,7 +846,7 @@ void nsi_init(uint32_t package) {
 }
 
 void nsi_port_cfg(uint16_t mask) {
-    uint32_t system = (wired_adapter.system_id == N64) ? 0 : 1;
+    uint32_t system = (HARDCODED_SYS == N64) ? 0 : 1;
 
     for (uint32_t i = 0; i < ARRAY_SIZE(gpio_pin); i++) {
 
