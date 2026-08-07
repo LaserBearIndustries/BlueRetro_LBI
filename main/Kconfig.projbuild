@@ -18,6 +18,33 @@ menu "BlueRetro"
             relay held its own state and did not need this. An adapter with
             no stored state yet comes up on.
 
+    config BLUERETRO_IO0_QDP_PWR_OFF
+        bool "Power the console off on an IO0 quick double press"
+        depends on BLUERETRO_HW2
+        default n
+        help
+            Upstream behaviour since v24.04: a short IO0 press resets the
+            console, and a second press within two seconds powers it off.
+            The window is wide and the gesture is easy to hit by accident
+            when you only meant to reset, so it is off by default here.
+            Reset, pairing and factory reset on IO0 are unaffected.
+
+    config BLUERETRO_IO0_RST_HOLD
+        bool "Hold the console in reset on an IO0 triple press and hold"
+        depends on BLUERETRO_HW2 && !BLUERETRO_IO0_QDP_PWR_OFF
+        default y
+        help
+            Tap IO0 three times in quick succession and keep the third tap
+            held down: the console reset line stays asserted until you let
+            go. GameBoy Interface parks the GameBoy Player module while reset
+            is held, which is what allows swapping GameBoy carts warm.
+
+            The first two taps reset the console as they normally would. A
+            third tap that is not actually held still acts as a plain reset.
+
+            Mutually exclusive with the quick double press power off, which
+            claims the same chained tap timing.
+
     choice
         prompt "Select universal or specific system"
         default BLUERETRO_SYSTEM_UNIVERSAL

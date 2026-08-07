@@ -54,6 +54,12 @@
 #define LED_P4_PIN 15
 
 #define INHIBIT_CNT 200
+/* Short debounce used between the taps of a chained gesture, so the following
+ * tap is not swallowed by the full inhibit above. */
+#define INHIBIT_DEBOUNCE_CNT 10
+/* Taps that arm the held reset, and how long a tap stays chainable. */
+#define RST_HOLD_PRESS_CNT 3
+#define RST_HOLD_CHAIN_MS 800
 
 /* Console power state is mirrored to the filesystem so that a volatile power
  * latch, such as a flip-flop driving a MOSFET switch, can be put back the way it
@@ -214,6 +220,12 @@ static void set_leds_as_btn_status(uint8_t state) {
         if (state) {
             esp_rom_gpio_connect_out_signal(pin, ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_1, 0, 0);
         }
+        else {
+            /* Hand the port LEDs back to the off channel. Without this they stay
+             * driven by the flash channel until wired_port_hdl() next runs, which
+             * looks like LEDs lighting up on their own for a fraction of a second. */
+            esp_rom_gpio_connect_out_signal(pin, ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_2, 0, 0);
+        }
     }
 
     /* Use error LED as well */
@@ -364,23 +376,73 @@ static void wired_port_hdl(void) {
 }
 
 static void boot_btn_hdl(void) {
+#ifdef CONFIG_BLUERETRO_IO0_QDP_PWR_OFF
     static uint32_t check_qdp = 0;
+#endif
+#ifdef CONFIG_BLUERETRO_IO0_RST_HOLD
+    static uint32_t press_cnt = 0;
+    static uint32_t press_window = 0;
+#endif
     static uint32_t inhibit_cnt = 0;
     uint32_t hold_cnt = 0;
     uint32_t state = 0;
+    uint32_t sys_on = 0;
+
+#ifdef CONFIG_BLUERETRO_IO0_RST_HOLD
+    /* Taps only chain while this window is open. Once it lapses the count
+     * towards the held reset gesture starts over. */
+    if (press_window && !--press_window) {
+        press_cnt = 0;
+    }
+#endif
 
     /* Let inhibit_cnt reach 0 before handling button again */
     if (inhibit_cnt && inhibit_cnt--) {
+#ifdef CONFIG_BLUERETRO_IO0_QDP_PWR_OFF
         /* Power off on quick double press */
         if (check_qdp && sys_mgr_get_power() && sys_mgr_get_boot_btn()) {
             sys_mgr_power_off();
             check_qdp = 0;
         }
+#endif
         return;
     }
+#ifdef CONFIG_BLUERETRO_IO0_QDP_PWR_OFF
     check_qdp = 0;
+#endif
 
     if (sys_mgr_get_boot_btn()) {
+#ifdef CONFIG_BLUERETRO_IO0_RST_HOLD
+        /* Final tap of the chain: keep the console in reset for as long as IO0
+         * is held. GameBoy Interface parks the GameBoy Player module while reset
+         * stays asserted, which is what makes swapping carts warm possible. */
+        if (press_cnt >= (RST_HOLD_PRESS_CNT - 1) && sys_mgr_get_power()) {
+            uint32_t held_cnt = 0;
+
+            printf("# %s: Console reset held until IO0 release\n", __FUNCTION__);
+            set_leds_as_btn_status(1);
+            set_reset(0);
+
+            while (sys_mgr_get_boot_btn()) {
+                held_cnt++;
+                vTaskDelay(10 / portTICK_PERIOD_MS);
+            }
+
+            /* Hold it for at least the normal pulse width, so a third tap that
+             * was not really held still lands as a proper reset. */
+            while (held_cnt++ < (hw_config.reset_pin_pulse_ms / 10)) {
+                vTaskDelay(10 / portTICK_PERIOD_MS);
+            }
+
+            set_reset(1);
+            set_leds_as_btn_status(0);
+
+            press_cnt = 0;
+            press_window = 0;
+            inhibit_cnt = INHIBIT_CNT;
+            return;
+        }
+#endif
         set_leds_as_btn_status(1);
 
         while (sys_mgr_get_boot_btn()) {
@@ -404,12 +466,15 @@ static void boot_btn_hdl(void) {
             state++;
         }
 
-        if (sys_mgr_get_power()) {
+        sys_on = sys_mgr_get_power();
+        if (sys_on) {
             /* System is on */
             switch (state) {
                 case SYS_MGR_BTN_STATE0:
                     sys_mgr_reset();
+#ifdef CONFIG_BLUERETRO_IO0_QDP_PWR_OFF
                     check_qdp = 1;
+#endif
                     break;
                 case SYS_MGR_BTN_STATE1:
                     if (bt_hci_get_inquiry()) {
@@ -442,6 +507,19 @@ static void boot_btn_hdl(void) {
         }
 
         set_leds_as_btn_status(0);
+
+#ifdef CONFIG_BLUERETRO_IO0_RST_HOLD
+        /* Only a quick tap that actually reset the console counts towards the
+         * held reset. Longer holds clear the chain and keep the full inhibit. */
+        if (sys_on && state == SYS_MGR_BTN_STATE0) {
+            press_cnt++;
+            press_window = RST_HOLD_CHAIN_MS / 10;
+            inhibit_cnt = INHIBIT_DEBOUNCE_CNT;
+            return;
+        }
+        press_cnt = 0;
+        press_window = 0;
+#endif
         inhibit_cnt = INHIBIT_CNT;
     }
 }
