@@ -6,6 +6,18 @@ menu "BlueRetro"
         help
             Select this to enable HW2 features like port detection.
 
+    config BLUERETRO_PWR_STATE_RESTORE
+        bool "Restore console power state after a power loss"
+        depends on BLUERETRO_HW2
+        default y
+        help
+            Mirror the console power state to the filesystem and re-assert it
+            early in boot. Needed when the stock bistable relay is replaced by
+            a volatile latch, such as a flip-flop driving a MOSFET switch,
+            which comes up off whenever the adapter loses power. The stock
+            relay held its own state and did not need this. An adapter with
+            no stored state yet comes up on.
+
     choice
         prompt "Select universal or specific system"
         default BLUERETRO_SYSTEM_UNIVERSAL

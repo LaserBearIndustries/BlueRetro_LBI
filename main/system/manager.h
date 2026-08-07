@@ -20,6 +20,7 @@ enum {
 };
 
 void sys_mgr_cmd(uint8_t cmd);
+void sys_mgr_early_pwr_restore(void);
 void sys_mgr_init(uint32_t package);
 
 #endif /* _SYS_MANAGER_H_ */

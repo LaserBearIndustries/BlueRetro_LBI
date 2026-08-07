@@ -12,6 +12,7 @@
 #define BDADDR_FILE "/fs/bdaddr.bin"
 #define CONFIG_FILE "/fs/config.bin"
 #define MEMORY_CARD_FILE "/fs/mc.bin"
+#define PWR_STATE_FILE "/fs/pwr_state.bin"
 #define BITSTREAM_FILE "/fs/bitstream.bit"
 
 int32_t fs_init(void);

@@ -12,6 +12,7 @@
 #include <esp_sleep.h>
 #include <esp_system.h>
 #include <soc/efuse_reg.h>
+#include <esp_log.h>
 #include "driver/gpio.h"
 #include "hal/ledc_hal.h"
 #include "hal/gpio_hal.h"
@@ -54,6 +55,11 @@
 
 #define INHIBIT_CNT 200
 
+/* Console power state is mirrored to the filesystem so that a volatile power
+ * latch, such as a flip-flop driving a MOSFET switch, can be put back the way it
+ * was once the adapter comes back up. The stock bistable relay kept its own
+ * state across a power loss and needed none of this. */
+
 typedef void (*sys_mgr_cmd_t)(void);
 
 enum {
@@ -79,6 +85,7 @@ static uint16_t port_state = 0;
 static RingbufHandle_t cmd_q_hdl = NULL;
 static uint32_t chip_package = EFUSE_RD_CHIP_VER_PKG_ESP32D0WDQ6;
 static bool factory_reset = false;
+static bool pwr_restore_done = false;
 
 static int32_t sys_mgr_get_power(void);
 static int32_t sys_mgr_get_boot_btn(void);
@@ -485,12 +492,62 @@ static void sys_mgr_inquiry_toggle(void) {
     }
 }
 
+#ifdef CONFIG_BLUERETRO_PWR_STATE_RESTORE
+/* Returns 1 or 0 for a stored state, -1 when nothing was ever stored.
+ * Kept on the filesystem rather than in NVS: every other NVS user here opens it
+ * read-only, and linking the NVS write path pulls enough extra IRAM-resident
+ * flash code to overflow iram0_0_seg on the GC build. */
+static int32_t pwr_state_load(void) {
+    int32_t ret = -1;
+    FILE *file = fopen(PWR_STATE_FILE, "rb");
+
+    if (file) {
+        uint8_t value = 0;
+
+        if (fread(&value, sizeof(value), 1, file) == 1) {
+            ret = value ? 1 : 0;
+        }
+        fclose(file);
+    }
+    return ret;
+}
+
+static void pwr_state_save(uint32_t state) {
+    uint8_t value = state ? 1 : 0;
+    FILE *file;
+
+    /* Skip the write when nothing changed. Power on gets re-issued on every BT
+     * connect while the console is off, and flash wear here is pointless. */
+    if (pwr_state_load() == (int32_t)value) {
+        return;
+    }
+
+    file = fopen(PWR_STATE_FILE, "wb");
+    if (file) {
+        fwrite(&value, sizeof(value), 1, file);
+        fclose(file);
+    }
+    else {
+        printf("# %s: failed to open %s for writing\n", __FUNCTION__, PWR_STATE_FILE);
+    }
+}
+#else
+static inline int32_t pwr_state_load(void) {
+    return -1;
+}
+
+static inline void pwr_state_save(uint32_t state) {
+    (void)state;
+}
+#endif /* CONFIG_BLUERETRO_PWR_STATE_RESTORE */
+
 static void sys_mgr_power_on(void) {
     set_power_on(1);
     if (!hw_config.power_pin_is_hold) {
         vTaskDelay(hw_config.power_pin_pulse_ms / portTICK_PERIOD_MS);
         set_power_on(0);
     }
+    pwr_state_save(1);
 }
 
 static void sys_mgr_power_off(void) {
@@ -504,6 +561,59 @@ static void sys_mgr_power_off(void) {
         vTaskDelay(hw_config.power_pin_pulse_ms / portTICK_PERIOD_MS);
         set_power_off(0);
     }
+    pwr_state_save(0);
+#endif
+}
+
+/* Called from wl_init_task() right after config_init(), well ahead of
+ * sys_mgr_init(). Everything between the two, the Bluetooth stack especially, is
+ * far slower than the console cares to wait for its power. */
+void sys_mgr_early_pwr_restore(void) {
+#if defined(CONFIG_BLUERETRO_HW2) && defined(CONFIG_BLUERETRO_PWR_STATE_RESTORE)
+    gpio_config_t io_conf = {0};
+    int32_t last_state;
+
+    /* hw_config_patch() runs again in sys_mgr_init(). It only re-reads NVS into
+     * hw_config, so calling it early is harmless and gives us the correct pin
+     * polarity, drive type and pulse width to work with here. */
+    hw_config_patch();
+
+    if (hw_config.power_pin_is_hold) {
+        /* Hold mode has to keep driving the pin, but sys_mgr_init() drives it low
+         * while configuring its outputs, which would undo us. Leave hold mode to
+         * the late restore that runs after that setup. */
+        return;
+    }
+    pwr_restore_done = true;
+
+    last_state = pwr_state_load();
+
+    /* -1 means nothing was ever stored, i.e. a freshly installed adapter. Treat
+     * that as on: the first thing anyone does after an install is switch the
+     * console on to test it. Only an explicit stored off keeps it off. */
+    if (last_state == 0) {
+        printf("# %s: Stored power state off, staying off\n", __FUNCTION__);
+        return;
+    }
+
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.mode = hw_config.power_pin_od ? GPIO_MODE_OUTPUT_OD : GPIO_MODE_OUTPUT;
+    set_power_on(0);
+    io_conf.pin_bit_mask = 1ULL << POWER_ON_PIN;
+    gpio_config(&io_conf);
+
+    sys_mgr_power_on();
+
+    /* Give the pin back as a floating input. internal_flag_init() samples it much
+     * later to tell an internal adapter from an external one, and it has to see
+     * the console side rather than our own drive. The latch keeps its state once
+     * pulsed, so releasing the line costs us nothing. */
+    io_conf.mode = GPIO_MODE_INPUT;
+    gpio_config(&io_conf);
+
+    printf("# %s: Power restored at %ums\n", __FUNCTION__, (unsigned)esp_log_timestamp());
 #endif
 }
 
@@ -771,6 +881,28 @@ void sys_mgr_init(uint32_t package) {
         sys_mgr_power_on();
         sys_mgr_deep_sleep();
     }
+
+#ifdef CONFIG_BLUERETRO_PWR_STATE_RESTORE
+    /* A volatile power latch always comes up off, so put back whatever state we
+     * were in before losing power. Normally sys_mgr_early_pwr_restore() has
+     * already done this far earlier in boot; this covers hold mode, which it
+     * has to leave until the power pins are configured just above. */
+    if (!pwr_restore_done) {
+        int32_t last_state = pwr_state_load();
+
+        printf("# %s: Stored power state: %d, sensed: %d\n", __FUNCTION__,
+            (int)last_state, (int)sys_mgr_get_power());
+
+        /* -1, never stored, counts as on. See sys_mgr_early_pwr_restore(). */
+        if (last_state != 0) {
+            /* Deliberately not gated on sys_mgr_get_power(): setting an already
+             * set latch is a no-op, and the sense pin is ignored outright when
+             * internal_flag_init() decides this is an external adapter. Trusting
+             * it here would silently disable the restore. */
+            sys_mgr_power_on();
+        }
+    }
+#endif /* CONFIG_BLUERETRO_PWR_STATE_RESTORE */
 #endif /* CONFIG_BLUERETRO_HW2 */
 
     xTaskCreatePinnedToCore(sys_mgr_task, "sys_mgr_task", 2048, NULL, 5, NULL, 0);

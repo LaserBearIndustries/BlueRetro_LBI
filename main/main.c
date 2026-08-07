@@ -111,6 +111,13 @@ static void wl_init_task(void *arg) {
     ESP_ERROR_CHECK(ret);
 
     config_init(DEFAULT_CFG);
+
+#ifndef CONFIG_BLUERETRO_QEMU
+    /* Get the console powered back up before the slow parts of boot. Everything
+     * below here, bt_host_init() above all, runs into hundreds of ms. */
+    sys_mgr_early_pwr_restore();
+#endif
+
     mc_init_mem();
 
 #ifndef CONFIG_BLUERETRO_BT_DISABLE
