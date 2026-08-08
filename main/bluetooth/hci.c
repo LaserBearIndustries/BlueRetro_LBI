@@ -1144,6 +1144,11 @@ static void bt_hci_le_meta_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                 }
                 goto skip;
 connect:
+                /* Something that already failed to pair is not worth a device
+                 * slot; each attempt costs a real controller its port. */
+                if (bt_host_le_is_pair_failed(&le_adv_report->adv_info[0].addr)) {
+                    goto skip;
+                }
                 bt_host_get_dev_from_bdaddr(le_adv_report->adv_info[0].addr.a.val, &device);
                 if (device == NULL) {
                     (void)bt_host_get_new_dev(&device);

@@ -442,6 +442,62 @@ void bt_host_disconnect_all(void) {
     }
 }
 
+/* Devices that connected and then failed to pair. Retrying them is not just
+ * wasted effort: every attempt claims the lowest free device slot, and
+ * wired_port_hdl() turns that slot index straight into a console port, so
+ * something that will never pair keeps pushing real controllers to port 2 with
+ * nothing plugged into port 1. Releasing the slot on failure is not enough on
+ * its own, because the disconnect is asynchronous and a controller can arrive
+ * inside that window.
+ *
+ * Kept in RAM only and cleared whenever the user asks to pair, so nothing here
+ * is permanent and any device can still be paired deliberately. */
+#define BT_LE_PAIR_FAIL_MAX 8
+static bt_addr_le_t le_pair_fail[BT_LE_PAIR_FAIL_MAX];
+static uint32_t le_pair_fail_cnt = 0;
+
+static inline uint32_t bt_host_le_pair_fail_len(void) {
+    return (le_pair_fail_cnt < BT_LE_PAIR_FAIL_MAX) ? le_pair_fail_cnt : BT_LE_PAIR_FAIL_MAX;
+}
+
+void bt_host_le_pair_failed(bt_addr_le_t *addr) {
+    uint32_t n = bt_host_le_pair_fail_len();
+
+    for (uint32_t i = 0; i < n; i++) {
+        if (memcmp(&le_pair_fail[i], addr, sizeof(*addr)) == 0) {
+            return;
+        }
+    }
+
+    /* A ring, so a busy room cannot fill this and wedge it. */
+    memcpy(&le_pair_fail[le_pair_fail_cnt % BT_LE_PAIR_FAIL_MAX], addr, sizeof(*addr));
+    le_pair_fail_cnt++;
+
+    printf("# %s: %02X:%02X:%02X:%02X:%02X:%02X parked until next pairing\n",
+        __FUNCTION__, addr->a.val[5], addr->a.val[4], addr->a.val[3],
+        addr->a.val[2], addr->a.val[1], addr->a.val[0]);
+}
+
+uint32_t bt_host_le_is_pair_failed(bt_addr_le_t *addr) {
+    uint32_t n = bt_host_le_pair_fail_len();
+
+    for (uint32_t i = 0; i < n; i++) {
+        if (memcmp(&le_pair_fail[i], addr, sizeof(*addr)) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void bt_host_le_pair_fail_clear(void) {
+    if (le_pair_fail_cnt) {
+        printf("# %s: forgetting %u parked device(s)\n", __FUNCTION__,
+            (unsigned)bt_host_le_pair_fail_len());
+    }
+    memset(le_pair_fail, 0, sizeof(le_pair_fail));
+    le_pair_fail_cnt = 0;
+}
+
 int32_t bt_host_get_new_dev(struct bt_dev **device) {
     for (uint32_t i = 0; i < BT_MAX_DEV; i++) {
         if (!atomic_test_bit(&bt_dev[i].flags, BT_DEV_DEVICE_FOUND)) {

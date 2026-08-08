@@ -577,6 +577,11 @@ static void sys_mgr_inquiry_toggle(void) {
         bt_hci_stop_inquiry();
     }
     else {
+        /* Only here, never in bt_hci_start_inquiry(): that also runs by itself
+         * every time the last device drops, which would wipe the list moments
+         * after anything landed on it. Asking to pair is a deliberate act, and
+         * the only point at which reconsidering a failed device makes sense. */
+        bt_host_le_pair_fail_clear();
         bt_hci_start_inquiry();
     }
 }
