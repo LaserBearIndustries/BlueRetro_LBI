@@ -1,0 +1,4 @@
+# Built with devkitPPC under Linux/WSL. core.autocrlf on a Windows checkout
+# would give the Makefile CRLF line endings, which make treats as part of each
+# command and chokes on. Keep this subtree LF regardless of platform.
+* text=auto eol=lf
