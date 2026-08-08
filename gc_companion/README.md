@@ -11,16 +11,44 @@ Tested end to end on HW2 GameCube hardware.
 
 - Adapter firmware built with `CONFIG_BLUERETRO_GC_APP` for remapping and the
   input viewer, and `CONFIG_BLUERETRO_GC_OTA` for firmware updates
-- devkitPro with devkitPPC and libogc (`gamecube-dev` package)
+- devkitPro with devkitPPC (`gamecube-dev` package)
+- libogc2 and its libfat, see below
 - A way to run homebrew: Swiss from SD Gecko or SD2SP2
 
+This builds against [libogc2](https://github.com/extremscorner/libogc2) rather
+than stock libogc, because it is what Swiss is built against and so has seen the
+widest range of real hardware. It installs alongside libogc rather than
+replacing it, so anything else built here is unaffected.
+
 ## Build
+
+libogc2 is not in the devkitPro pacman repositories. If its own repository is
+reachable it can be installed with `dkp-pacman -S libogc2 libogc2-libfat`.
+Otherwise build both from source, which needs `ppc-libmad` only because
+libogc2's Makefile builds an MP3 player nothing here links:
+
+```
+sudo dkp-pacman -S --needed ppc-libmad
+
+git clone https://github.com/extremscorner/libogc2.git
+cd libogc2 && make && make install && cd ..
+
+git clone https://github.com/extremscorner/libfat.git
+cd libfat && make ogc-release && make ogc-install && cd ..
+```
+
+`make install` needs `sudo -E` unless `$DEVKITPRO` is writable by your user.
+libogc2 also offers `libdvm` in place of libfat, which adds exFAT; either works
+with no code changes.
+
+Then:
 
 ```
 make
 ```
 
-Produces `blueretro_companion.dol`.
+Produces `blueretro_companion.dol`. The Makefile fails with a clear message if
+libogc2 is missing rather than silently falling back to libogc.
 
 ## Use
 

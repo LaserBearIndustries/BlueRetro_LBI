@@ -7,7 +7,17 @@ ifeq ($(strip $(DEVKITPPC)),)
 $(error "Please set DEVKITPPC in your environment. export DEVKITPPC=<path to>devkitPPC")
 endif
 
-include $(DEVKITPPC)/gamecube_rules
+# libogc2 rather than stock libogc: it is what Swiss is built against, so it has
+# seen the widest range of real hardware, and this app runs from Swiss. It
+# installs alongside libogc rather than replacing it, and exports the same
+# LIBOGC_INC and LIBOGC_LIB, so nothing below needs to know which is in use.
+# Needs libogc2 and extremscorner/libfat. See README.
+LIBOGC2_RULES := $(DEVKITPRO)/libogc2/gamecube_rules
+ifeq ($(wildcard $(LIBOGC2_RULES)),)
+$(error "libogc2 not found at $(DEVKITPRO)/libogc2 - see README for how to build it")
+endif
+
+include $(LIBOGC2_RULES)
 
 #---------------------------------------------------------------------------------
 # TARGET is the name of the output
