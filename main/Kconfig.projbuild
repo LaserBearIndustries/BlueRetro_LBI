@@ -69,6 +69,20 @@ menu "BlueRetro"
 
             Costs a small snapshot on every controller report. Prototype.
 
+    config BLUERETRO_GC_FACE_MAP_TOGGLE
+        bool "Let PAD_MS flip the GameCube face buttons between layouts"
+        default n
+        help
+            Upstream behaviour: pressing and releasing PAD_MS swaps the face
+            buttons between position based and name based mapping, so a
+            Nintendo layout pad can be made to match an Xbox one.
+
+            It is a bare button press, not a combo, with nothing on screen to
+            say which layout is active. Hitting it by accident leaves A dead
+            and X sending A, which is a long way to walk back from. Off by
+            default here, since a Switch 2 GameCube pad is already laid out
+            like the console it is plugged into.
+
     choice
         prompt "Select universal or specific system"
         default BLUERETRO_SYSTEM_UNIVERSAL

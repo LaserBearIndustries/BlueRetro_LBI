@@ -68,6 +68,7 @@ static DRAM_ATTR const uint32_t gc_btns_mask[32] = {
     0, BIT(GC_Z), BIT(GC_L), 0,
     0, BIT(GC_Z), BIT(GC_R), 0,
 };
+#ifdef CONFIG_BLUERETRO_GC_FACE_MAP_TOGGLE
 static DRAM_ATTR const uint32_t gc_btns_mask_alt[32] = {
     0, 0, 0, 0,
     0, 0, 0, 0,
@@ -78,6 +79,7 @@ static DRAM_ATTR const uint32_t gc_btns_mask_alt[32] = {
     0, BIT(GC_Z), BIT(GC_L), 0,
     0, BIT(GC_Z), BIT(GC_R), 0,
 };
+#endif /* CONFIG_BLUERETRO_GC_FACE_MAP_TOGGLE */
 static DRAM_ATTR const uint32_t *btns_mask[WIRED_MAX_DEV] = {
     gc_btns_mask, gc_btns_mask, gc_btns_mask, gc_btns_mask,
     gc_btns_mask, gc_btns_mask, gc_btns_mask, gc_btns_mask,
@@ -169,6 +171,10 @@ void gc_meta_init(struct wired_ctrl *ctrl_data) {
 }
 
 static void gc_ctrl_special_action(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
+#ifndef CONFIG_BLUERETRO_GC_FACE_MAP_TOGGLE
+    (void)ctrl_data;
+    (void)wired_data;
+#else
     /* Face buttons mapping convertion toggle between names & positions */
     if (ctrl_data->map_mask[0] & generic_btns_mask[PAD_MS]) {
         if (ctrl_data->btns[0].value & generic_btns_mask[PAD_MS]) {
@@ -192,6 +198,7 @@ static void gc_ctrl_special_action(struct wired_ctrl *ctrl_data, struct wired_da
             }
         }
     }
+#endif /* CONFIG_BLUERETRO_GC_FACE_MAP_TOGGLE */
 }
 
 static void gc_ctrl_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
