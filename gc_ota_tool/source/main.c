@@ -24,6 +24,7 @@
 /* Must match main/wired/nsi.c and main/system/gc_ota.h in the firmware. */
 #define GC_OTA_CMD 0x1E
 #define GC_OTA_STATUS_CMD 0x1F
+#define GC_OTA_VER_CMD 0x20
 
 #define GC_OTA_SUB_START 0x00
 #define GC_OTA_SUB_DATA 0x01
@@ -39,6 +40,17 @@
 #define GC_OTA_PROTO_VER 1
 #define GC_OTA_STATUS_LEN 3
 #define GC_OTA_DATA_LEN 8
+
+/* Version string, fetched a slice at a time. Mirrors esp_app_desc_t::version. */
+#define GC_OTA_VER_LEN 32
+#define GC_OTA_VER_CHUNK 8
+
+/* Layout of esp_app_desc_t inside an ESP-IDF application image. The descriptor
+ * sits right behind the 24 byte image header plus one 8 byte segment header. */
+#define APP_DESC_OFF 0x20
+#define APP_DESC_MAGIC 0xABCD5432
+#define APP_DESC_VER_OFF (APP_DESC_OFF + 0x10)
+#define APP_DESC_NAME_OFF (APP_DESC_OFF + 0x30)
 
 /* The adapter stages a kilobyte in RAM before flushing it to flash, so a batch
  * of exactly that many frames lines up one flush with one status poll. Sending
@@ -142,6 +154,61 @@ static int ota_wait_ready(int chan, u8 *last_seq) {
     }
 }
 
+/* Reads the running firmware version out of the adapter, one slice per
+ * transaction because a whole SI reply has to fit in 128 bits. */
+static int ota_get_version(int chan, char *out) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+    int chunk;
+
+    memset(out, 0, GC_OTA_VER_LEN + 1);
+
+    for (chunk = 0; chunk < GC_OTA_VER_LEN / GC_OTA_VER_CHUNK; chunk++) {
+        req[0] = GC_OTA_VER_CMD;
+        req[1] = (u8)chunk;
+        memset(in, 0, sizeof(in));
+
+        if (si_xfer(chan, req, 2, in, GC_OTA_VER_CHUNK) < 0) {
+            return -1;
+        }
+        memcpy(out + chunk * GC_OTA_VER_CHUNK, in, GC_OTA_VER_CHUNK);
+    }
+
+    out[GC_OTA_VER_LEN] = '\0';
+    return 0;
+}
+
+/* Pulls the version and project name straight out of the image's own
+ * esp_app_desc_t, so the card is described by what it actually contains rather
+ * than by its filename. */
+static int image_get_version(FILE *f, char *ver, char *name) {
+    u8 hdr[APP_DESC_NAME_OFF + 32];
+    u32 magic;
+
+    memset(ver, 0, GC_OTA_VER_LEN + 1);
+    memset(name, 0, 32 + 1);
+
+    if (fseek(f, 0, SEEK_SET) != 0 || fread(hdr, 1, sizeof(hdr), f) != sizeof(hdr)) {
+        return -1;
+    }
+
+    magic = (u32)hdr[APP_DESC_OFF]
+          | ((u32)hdr[APP_DESC_OFF + 1] << 8)
+          | ((u32)hdr[APP_DESC_OFF + 2] << 16)
+          | ((u32)hdr[APP_DESC_OFF + 3] << 24);
+    if (magic != APP_DESC_MAGIC) {
+        return -1;
+    }
+
+    memcpy(ver, &hdr[APP_DESC_VER_OFF], GC_OTA_VER_LEN);
+    ver[GC_OTA_VER_LEN] = '\0';
+    memcpy(name, &hdr[APP_DESC_NAME_OFF], 32);
+    name[32] = '\0';
+
+    fseek(f, 0, SEEK_SET);
+    return 0;
+}
+
 /* A real controller does not answer 0x1F at all, so a good reply with a
  * recognised protocol version is a solid enough fingerprint. */
 static int ota_find_adapter(void) {
@@ -217,7 +284,6 @@ int main(int argc, char **argv) {
     fseek(f, 0, SEEK_END);
     fw_size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    printf("Firmware: %ld bytes\n\n", fw_size);
 
     /* libogc's PAD driver keeps SI auto polling running, which fights manual
      * transfers. Hand the bus over for the duration of the update. */
@@ -230,6 +296,55 @@ int main(int argc, char **argv) {
         SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
         fclose(f);
         wait_exit();
+    }
+
+    {
+        char installed[GC_OTA_VER_LEN + 1];
+        char card_ver[GC_OTA_VER_LEN + 1];
+        char card_name[32 + 1];
+        int have_installed = (ota_get_version(chan, installed) == 0);
+        int have_card = (image_get_version(f, card_ver, card_name) == 0);
+
+        printf("\n");
+        printf("  installed : %s\n", have_installed && installed[0] ? installed : "(unknown)");
+        if (have_card) {
+            printf("  on card   : %s\n", card_ver[0] ? card_ver : "(unnamed)");
+            printf("  image     : %s, %ld bytes\n", card_name, fw_size);
+        }
+        else {
+            printf("  on card   : (no valid ESP-IDF image header)\n");
+            printf("  image     : %s, %ld bytes\n", FW_PATH, fw_size);
+            printf("\n  That file does not look like adapter firmware.\n");
+        }
+
+        if (have_installed && have_card && strcmp(installed, card_ver) == 0) {
+            printf("\n  These are the same version.\n");
+        }
+
+        /* Reading buttons means letting libogc poll again, so hand the bus back
+         * for the prompt and take it again before the transfer starts. */
+        SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+
+        printf("\nPress A to flash, B to cancel.\n");
+        for (;;) {
+            u16 down;
+
+            PAD_ScanPads();
+            down = PAD_ButtonsDown(0);
+
+            if (down & PAD_BUTTON_A) {
+                break;
+            }
+            if (down & PAD_BUTTON_B) {
+                printf("\nCancelled. Nothing was written.\n");
+                SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+                fclose(f);
+                wait_exit();
+            }
+            VIDEO_WaitVSync();
+        }
+
+        SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
     }
 
     printf("\nDo NOT power off until this finishes.\n\n");

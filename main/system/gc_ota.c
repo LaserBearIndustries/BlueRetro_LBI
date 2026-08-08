@@ -4,9 +4,11 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_attr.h>
+#include <esp_app_desc.h>
 #include <esp_ota_ops.h>
 #include "system/manager.h"
 #include "gc_ota.h"
@@ -34,6 +36,11 @@ static volatile uint8_t ota_req = GC_OTA_REQ_NONE;
 static volatile uint8_t ota_seq = 0;
 static volatile uint32_t ota_len = 0;
 static uint8_t ota_buf[GC_OTA_CHUNK];
+
+/* Snapshot of the running firmware version, taken once at init. The ISR cannot
+ * read it out of the app descriptor directly: that lives in flash mapped memory
+ * and cache is disabled while a flush is in progress. */
+static uint8_t ota_ver[GC_OTA_VER_LEN];
 
 /* Task side only. */
 static esp_ota_handle_t ota_hdl = 0;
@@ -91,6 +98,14 @@ void IRAM_ATTR gc_ota_status(uint8_t *status) {
     status[0] = ota_state;
     status[1] = ota_seq;
     status[2] = GC_OTA_PROTO_VER;
+}
+
+void IRAM_ATTR gc_ota_version(uint8_t chunk, uint8_t *out) {
+    uint32_t off = (uint32_t)chunk * GC_OTA_VER_CHUNK;
+
+    for (uint32_t i = 0; i < GC_OTA_VER_CHUNK; i++) {
+        out[i] = ((off + i) < GC_OTA_VER_LEN) ? ota_ver[off + i] : 0;
+    }
 }
 
 static void gc_ota_task(void *arg) {
@@ -162,5 +177,12 @@ static void gc_ota_task(void *arg) {
 }
 
 void gc_ota_init(void) {
+    const esp_app_desc_t *desc = esp_app_get_description();
+
+    memset(ota_ver, 0, sizeof(ota_ver));
+    if (desc) {
+        memcpy(ota_ver, desc->version, sizeof(ota_ver));
+    }
+
     xTaskCreatePinnedToCore(gc_ota_task, "gc_ota_task", 4096, NULL, 5, NULL, 0);
 }

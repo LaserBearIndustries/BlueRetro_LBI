@@ -4,9 +4,8 @@ Pushes a firmware image into the adapter's OTA partition over a GameCube
 controller port, with no Bluetooth involved. Meant as a recovery path for when
 the Bluetooth stack is the thing that needs replacing.
 
-**Status: untested.** The adapter half builds and has been checked against the
-firmware, but this GameCube half has never been compiled or run. Treat the first
-run as a bring-up exercise, and keep a working BLE update path available.
+Tested end to end on HW2 GameCube hardware: full image transferred, verified and
+booted.
 
 ## Requirements
 
@@ -29,14 +28,30 @@ Produces `blueretro_ota.dol`.
 2. Copy `blueretro_ota.dol` to the card as well.
 3. Launch it from Swiss.
 
-It probes all four ports for an adapter, then streams the image. Do not cut
-power while it runs. If it fails partway, the adapter keeps running its current
-firmware: the OTA partition being written is the inactive one, and it only
-becomes the boot partition once the whole image has been written and verified.
+It probes all four ports for an adapter, then shows what is installed against
+what is on the card before doing anything:
+
+```
+  installed : v26.08_LBI-2-g327ade5
+  on card   : v26.10_LBI
+  image     : BlueRetro_hw2_gamecube, 609536 bytes
+
+Press A to flash, B to cancel.
+```
+
+The installed version comes from the adapter over opcode `0x20`. The card
+version is read out of the image's own `esp_app_desc_t` rather than its
+filename, so a file that is not adapter firmware is called out instead of being
+streamed blindly. Matching versions are pointed out, which is the usual sign of
+a stale copy on the card.
+
+Do not cut power while it runs. If it fails partway the adapter keeps running
+its current firmware: the partition being written is the inactive one, and it
+only becomes the boot partition once the whole image is written and verified.
 
 ## Protocol
 
-Two vendor SI opcodes, implemented in `main/wired/nsi.c` and
+Three vendor SI opcodes, implemented in `main/wired/nsi.c` and
 `main/system/gc_ota.c`.
 
 `0x1E` carries data and is never answered, like the existing game id command.
@@ -52,6 +67,10 @@ Its payload is `[sub][seq][8 data bytes]`:
 `0x1F` is answered with three bytes, `[state][last accepted seq][protocol
 version]`, where state is `0` idle, `1` ready, `2` busy, `3` done, `4` error.
 
+`0x20` takes a one byte slice index and answers with eight bytes of the running
+firmware's version string. Four slices cover the 32 byte field, because a whole
+SI reply has to fit in 128 bits.
+
 The console must stop sending while the adapter reports busy. Writing flash
 stalls the cache for tens of milliseconds and nothing can service the SI link
 during that, so anything sent meanwhile is simply dropped.
@@ -61,17 +80,19 @@ sequence it has already taken. That makes retries harmless and lets the console
 resynchronise after a busy period by rewinding to the last acknowledged frame
 rather than guessing.
 
-## Known rough edges
+## Notes
 
-Areas most likely to need work on first bring-up:
+Two assumptions that first bring-up settled, worth recording since they shaped
+the design:
 
-- **SI auto polling.** libogc's PAD driver keeps polling in the background,
-  which fights manual `SI_Transfer`. The tool disables polling for the duration
-  and re-enables it after; the exact call may need adjusting.
-- **Zero length replies.** The data opcode is deliberately not answered, so
-  `SI_Transfer` is asked for a zero byte response. If libogc treats that as an
-  error or never fires the callback, the data command needs a dummy reply added
-  on the adapter side.
-- **Throughput.** Eight bytes per transaction is the deliberately dumb starting
-  point. Measure before optimising: the flush pacing is expected to dominate, in
-  which case a wider payload buys nothing.
+- **Zero length replies work.** The data opcode is deliberately not answered and
+  `SI_Transfer` is asked for a zero byte response. That turned out fine, so the
+  adapter needs no dummy reply.
+- **Disabling SI polling is sufficient.** libogc's PAD driver polls in the
+  background, which would fight manual transfers. Turning polling off for the
+  duration is enough. The tool hands the bus back for the confirmation prompt,
+  since reading buttons needs polling, and takes it again before transferring.
+
+Throughput has not been optimised. Eight bytes per transaction is the
+deliberately dumb starting point, and flush pacing is expected to dominate, so a
+wider payload may buy nothing. Measure before changing it.

@@ -16,6 +16,11 @@
 /* Bytes returned by the status command. */
 #define GC_OTA_STATUS_LEN 3
 
+/* The running firmware version, handed back a slice at a time because a whole
+ * SI transaction has to fit in 128 bits. Matches esp_app_desc_t::version. */
+#define GC_OTA_VER_LEN 32
+#define GC_OTA_VER_CHUNK 8
+
 #define GC_OTA_PROTO_VER 1
 
 /* Sub command, carried in the first payload byte. */
@@ -36,9 +41,10 @@ enum {
     GC_OTA_ERROR,
 };
 
-/* Both called straight from the RMT ISR. */
+/* All three called straight from the RMT ISR. */
 void gc_ota_cmd(const uint8_t *payload);
 void gc_ota_status(uint8_t *status);
+void gc_ota_version(uint8_t chunk, uint8_t *out);
 
 void gc_ota_init(void);
 
