@@ -1,3 +1,8 @@
+This Repository is specifically for the Laser Bear GameCube BlueRetro Internal adapter and its customized firmware. This firmware is HW2 only, and is not intended for external dongles. 
+If the demand exists for HW1 version of the firmware I will work on it at a later date. 
+Our Fork has implemented changes from another fork that target better NSO GameCube Controller support.
+We have also implemented Direct Updates Via a GameCube DOL bootable with Swiss.  
+
 # Fork: NSO GameCube controller support
 
 **This is a fork of [darthcloud/BlueRetro](https://github.com/darthcloud/BlueRetro),
