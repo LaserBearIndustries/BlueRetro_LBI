@@ -432,6 +432,13 @@ void adapter_bridge(struct bt_data *bt_data) {
         /* Snapshot before mapping: the app wants to know which button was
          * actually pressed, not what it currently maps to. */
         gc_app_input_update(bt_data->base.pids->out_idx, ctrl_input);
+
+        /* While the app is capturing a mapping, the pad being remapped must not
+         * also be driving the game. Stop short of the wired output; the app is
+         * still fed by the snapshot above. */
+        if (gc_app_is_muted(bt_data->base.pids->out_idx)) {
+            return;
+        }
 #endif
         if (wired_adapter.system_id != WIRED_AUTO) {
             if (wired_meta_init(ctrl_output)) {

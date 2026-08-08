@@ -53,9 +53,11 @@
 #define GC_OTA_STATUS_CMD 0x1F
 #define GC_OTA_VER_CMD 0x20
 
-/* Raw pre mapping controller state, for the companion app's input viewer and
- * later its mapping wizard. */
+/* Companion app: raw pre mapping controller state, staged mapping writes, and
+ * the capture mode that holds the wired output neutral while remapping. */
 #define GC_APP_INPUT_CMD 0x21
+#define GC_APP_MAP_CMD 0x22
+#define GC_APP_MODE_CMD 0x23
 
 #define RMT_MEM_ITEM_NUM SOC_RMT_MEM_WORDS_PER_CHANNEL
 
@@ -281,6 +283,28 @@ static void nsi_app_input_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, GC_APP_INPUT_LEN, &crc, STOP_BIT_2US);
     RMT.conf_ch[channel].conf1.tx_start = 1;
 }
+
+/* Both of these are write only, like the game id command: the app reads the
+ * result back out of the input reply instead. */
+static void nsi_app_map_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    item = nsi_items_to_bytes(item, buf, 9);
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 1;
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 0;
+    RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_HW;
+    RMT.conf_ch[channel].conf1.rx_en = 1;
+
+    gc_app_map_cmd(buf);
+}
+
+static void nsi_app_mode_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    item = nsi_items_to_bytes(item, buf, 2);
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 1;
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 0;
+    RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_HW;
+    RMT.conf_ch[channel].conf1.rx_en = 1;
+
+    gc_app_mode_cmd(buf);
+}
 #endif
 
 static void nsi_ota_version_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
@@ -482,6 +506,12 @@ static void gc_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
         case GC_APP_INPUT_CMD:
             nsi_app_input_hdlr(channel, port, item);
             break;
+        case GC_APP_MAP_CMD:
+            nsi_app_map_hdlr(channel, port, item);
+            break;
+        case GC_APP_MODE_CMD:
+            nsi_app_mode_hdlr(channel, port, item);
+            break;
 #endif
         case 0x00:
         case 0xFF:
@@ -526,6 +556,12 @@ static void gc_pad_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
 #ifdef CONFIG_BLUERETRO_GC_APP
         case GC_APP_INPUT_CMD:
             nsi_app_input_hdlr(channel, port, item);
+            break;
+        case GC_APP_MAP_CMD:
+            nsi_app_map_hdlr(channel, port, item);
+            break;
+        case GC_APP_MODE_CMD:
+            nsi_app_mode_hdlr(channel, port, item);
             break;
 #endif
         case 0x00:

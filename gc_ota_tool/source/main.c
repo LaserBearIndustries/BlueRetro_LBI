@@ -45,11 +45,60 @@
 #define GC_OTA_VER_LEN 32
 #define GC_OTA_VER_CHUNK 8
 
-/* Raw pre mapping controller state. Must match main/system/gc_app.h. */
+/* Companion app opcodes. Must match main/system/gc_app.h. */
 #define GC_APP_INPUT_CMD 0x21
+#define GC_APP_MAP_CMD 0x22
+#define GC_APP_MODE_CMD 0x23
 #define GC_APP_INPUT_LEN 12
 #define GC_APP_AXIS_CNT 6
 #define GC_APP_NO_DEV 0xFF
+
+#define GC_APP_MAP_BEGIN 0
+#define GC_APP_MAP_SET 1
+#define GC_APP_MAP_COMMIT 2
+#define GC_APP_MAP_CANCEL 3
+
+#define GC_APP_ST_IDLE 0
+#define GC_APP_ST_BUSY 1
+#define GC_APP_ST_OK 2
+#define GC_APP_ST_ERROR 3
+#define GC_APP_ST_MUTED 0x80
+
+/* Generic button ids the GameCube driver understands, from adapter.h:108. */
+#define PAD_LX_LEFT 0
+#define PAD_LX_RIGHT 1
+#define PAD_LY_DOWN 2
+#define PAD_LY_UP 3
+#define PAD_RX_LEFT 4
+#define PAD_RX_RIGHT 5
+#define PAD_RY_DOWN 6
+#define PAD_RY_UP 7
+#define PAD_LD_LEFT 8
+#define PAD_LD_RIGHT 9
+#define PAD_LD_DOWN 10
+#define PAD_LD_UP 11
+#define PAD_RB_LEFT 16
+#define PAD_RB_RIGHT 17
+#define PAD_RB_DOWN 18
+#define PAD_RB_UP 19
+#define PAD_MM 20
+#define PAD_MQ 23
+#define PAD_LM 24
+#define PAD_LS 25
+#define PAD_LT 26
+#define PAD_RM 28
+#define PAD_RS 29
+#define PAD_RT 30
+
+/* An axis has to move this far, of 127, to count as a deliberate push. */
+#define AXIS_CAPTURE_THRESHOLD 70
+
+/* Frames a button must stay down to mean cancel rather than a mapping. Long
+ * enough that no ordinary tap reaches it. */
+#define CAPTURE_CANCEL_FRAMES 150
+
+/* Analog triggers also assert their digital click once bottomed out. */
+#define TRIGGER_CLICK_THRESHOLD 95
 
 /* Layout of esp_app_desc_t inside an ESP-IDF application image. The descriptor
  * sits right behind the 24 byte image header plus one 8 byte segment header. */
@@ -264,6 +313,22 @@ static int app_read_input(int chan, u8 *dev, u32 *btns, s8 *axes) {
     return 0;
 }
 
+/* Commit progress rides in byte 1 of the input reply, so there is no separate
+ * status opcode to poll. */
+static int app_read_status(int chan, u8 *st) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+
+    req[0] = GC_APP_INPUT_CMD;
+    memset(in, 0, sizeof(in));
+
+    if (si_xfer(chan, req, 1, in, GC_APP_INPUT_LEN) < 0) {
+        return -1;
+    }
+    *st = in[1] & 0x0F;
+    return 0;
+}
+
 /* Signed bar, -127..127, centre marked. */
 static void draw_axis(const char *name, s8 v) {
     char bar[33];
@@ -337,7 +402,376 @@ static void input_viewer(void) {
     printf("\x1b[2J\x1b[1;1H");
 }
 
-/* Returns 0 for the firmware update, 1 for the input viewer. */
+/* ------------------------------------------------------------------ *
+ * Mapping wizard
+ * ------------------------------------------------------------------ */
+
+struct map_entry {
+    u8 src, dst, dst_id, max, thr, dz, turbo;
+};
+
+/* What the wizard asks for, in order. A stick or trigger prompt captures a
+ * whole control rather than one direction: asking for eight stick directions
+ * separately is both tedious and easy to get wrong. */
+enum { CAP_BTN = 0, CAP_STICK, CAP_TRIGGER };
+
+struct capture_step {
+    const char *prompt;
+    u8 kind;
+    u8 dst;         /* CAP_BTN: the generic id to drive */
+    u8 dst_axis;    /* CAP_STICK/CAP_TRIGGER: first of the target direction ids */
+};
+
+static const struct capture_step capture_steps[] = {
+    { "Main stick  - move it in a full circle", CAP_STICK,   0, PAD_LX_LEFT },
+    { "C stick     - move it in a full circle", CAP_STICK,   0, PAD_RX_LEFT },
+    { "D-pad UP",                               CAP_BTN,     PAD_LD_UP,    0 },
+    { "D-pad DOWN",                             CAP_BTN,     PAD_LD_DOWN,  0 },
+    { "D-pad LEFT",                             CAP_BTN,     PAD_LD_LEFT,  0 },
+    { "D-pad RIGHT",                            CAP_BTN,     PAD_LD_RIGHT, 0 },
+    { "A",                                      CAP_BTN,     PAD_RB_DOWN,  0 },
+    { "B",                                      CAP_BTN,     PAD_RB_LEFT,  0 },
+    { "X",                                      CAP_BTN,     PAD_RB_RIGHT, 0 },
+    { "Y",                                      CAP_BTN,     PAD_RB_UP,    0 },
+    { "START",                                  CAP_BTN,     PAD_MM,       0 },
+    { "Z",                                      CAP_BTN,     PAD_RS,       0 },
+    { "L  - pull it all the way in",            CAP_TRIGGER, 0, PAD_LM },
+    { "R  - pull it all the way in",            CAP_TRIGGER, 0, PAD_RM },
+};
+#define CAPTURE_STEP_CNT (int)(sizeof(capture_steps) / sizeof(capture_steps[0]))
+
+/* Combos, so the adapter keeps its reset, pairing and power off gestures. Same
+ * set config.c bakes in for GameCube builds. */
+static const u8 combo_src[10] = {
+    PAD_LM, PAD_RM, PAD_MQ, PAD_RB_UP, PAD_RB_DOWN,
+    PAD_RB_RIGHT, PAD_RB_LEFT, PAD_LD_UP, PAD_LD_DOWN, 21 /* PAD_MS */
+};
+#define BR_COMBO_BASE_1 118
+#define BR_COMBO_CNT 10
+
+static int app_map_send(int chan, u8 sub, const u8 *args, int n) {
+    static u8 out[32] ATTRIBUTE_ALIGN(32);
+    int i;
+
+    out[0] = GC_APP_MAP_CMD;
+    out[1] = sub;
+    for (i = 0; i < 8; i++) {
+        out[2 + i] = (i < n) ? args[i] : 0;
+    }
+    return si_xfer(chan, out, 10, NULL, 0);
+}
+
+static int app_mode_send(int chan, u8 enable, u8 port) {
+    static u8 out[32] ATTRIBUTE_ALIGN(32);
+
+    out[0] = GC_APP_MODE_CMD;
+    out[1] = enable;
+    out[2] = port;
+    return si_xfer(chan, out, 3, NULL, 0);
+}
+
+/* Waits until nothing is held, so one press cannot satisfy two prompts. */
+static void wait_neutral(int chan) {
+    u8 dev; u32 btns; s8 ax[GC_APP_AXIS_CNT];
+    int quiet = 0, i;
+
+    while (quiet < 8) {
+        if (app_read_input(chan, &dev, &btns, ax) == 0) {
+            int moved = 0;
+
+            for (i = 0; i < GC_APP_AXIS_CNT; i++) {
+                if (ax[i] > AXIS_CAPTURE_THRESHOLD || ax[i] < -AXIS_CAPTURE_THRESHOLD) {
+                    moved = 1;
+                }
+            }
+            quiet = (btns == 0 && !moved) ? quiet + 1 : 0;
+        }
+        VIDEO_WaitVSync();
+    }
+}
+
+/* Captures on release rather than press, so a long hold can mean cancel without
+ * any button being off limits. Reserving one for cancel does not work here:
+ * 0x21 only ever reports the Bluetooth pad being remapped, and every button on
+ * it is a legitimate mapping target. An Xbox Menu button is PAD_MM, the same id
+ * a reserved Start would have used.
+ *
+ * Returns the bit index pressed, or -1 if the user held to cancel. */
+static int capture_button(int chan, const char *prompt, int step, int total) {
+    u8 dev; u32 btns; s8 ax[GC_APP_AXIS_CNT];
+    int i, pressed = -1, held = 0;
+
+    wait_neutral(chan);
+    for (;;) {
+        if (app_read_input(chan, &dev, &btns, ax) == 0) {
+            int first = -1;
+
+            for (i = 0; i < 32; i++) {
+                if (btns & (1u << i)) {
+                    first = i;
+                    break;
+                }
+            }
+
+            printf("\x1b[2J\x1b[1;1H");
+            printf("Mapping wizard   (%d/%d)\n", step, total);
+            printf("=======================\n\n");
+            printf("  Press the control you want for:\n\n     %s\n", prompt);
+            if (pressed >= 0) {
+                printf("\n  holding %s ... keep holding to cancel\n", btn_name[pressed]);
+            }
+            printf("\n\n  Tap to map it. Hold anything to cancel.\n");
+
+            if (first >= 0) {
+                if (first != pressed) {
+                    pressed = first;
+                    held = 0;
+                }
+                if (++held > CAPTURE_CANCEL_FRAMES) {
+                    return -1;
+                }
+            }
+            else if (pressed >= 0) {
+                return pressed;
+            }
+        }
+        VIDEO_WaitVSync();
+    }
+}
+
+/* Returns the index of the axis that moved, or -1 on cancel. Cancel is any
+ * button held, for the same reason as capture_button(). */
+static int capture_axis(int chan, const char *prompt, int first, int last,
+                        int step, int total) {
+    u8 dev; u32 btns; s8 ax[GC_APP_AXIS_CNT];
+    int i, held = 0;
+
+    wait_neutral(chan);
+    for (;;) {
+        if (app_read_input(chan, &dev, &btns, ax) == 0) {
+            printf("\x1b[2J\x1b[1;1H");
+            printf("Mapping wizard   (%d/%d)\n", step, total);
+            printf("=======================\n\n");
+            printf("  Move the control you want for:\n\n     %s\n", prompt);
+            printf("\n\n  Hold any button to cancel.\n");
+
+            if (btns) {
+                if (++held > CAPTURE_CANCEL_FRAMES) {
+                    return -1;
+                }
+            }
+            else {
+                held = 0;
+                for (i = first; i <= last; i++) {
+                    if (ax[i] > AXIS_CAPTURE_THRESHOLD || ax[i] < -AXIS_CAPTURE_THRESHOLD) {
+                        return i;
+                    }
+                }
+            }
+        }
+        VIDEO_WaitVSync();
+    }
+}
+
+/* How the digital L/R click is produced. Controllers differ: a GameCube or NSO
+ * pad has a real microswitch under the trigger and reports it as its own
+ * button, while an Xbox pad is analog all the way down and has nothing to
+ * capture. Deriving the click from the axis is right for the latter and wrong
+ * for the former, where it would fire before the switch does. */
+enum { TRIG_DERIVED = 0, TRIG_SEPARATE };
+
+static int trigger_mode_menu(void) {
+    int sel = 0;
+
+    for (;;) {
+        u16 down;
+
+        printf("\x1b[2J\x1b[1;1H");
+        printf("Mapping wizard\n==============\n\n");
+        printf("  How do your triggers work?\n\n");
+        printf("   %s Analog only, click derived at %d%%\n", sel == 0 ? ">" : " ",
+            TRIGGER_CLICK_THRESHOLD);
+        printf("     for Xbox and similar, no switch at the bottom\n\n");
+        printf("   %s Analog plus a real full pull click\n", sel == 1 ? ">" : " ");
+        printf("     for GameCube and NSO pads, captured separately\n");
+        printf("\n  D-pad to choose, A to start, B to go back.\n");
+
+        do {
+            PAD_ScanPads();
+            down = PAD_ButtonsDown(0);
+            VIDEO_WaitVSync();
+        } while (!down);
+
+        if (down & PAD_BUTTON_B) {
+            return -1;
+        }
+        if (down & (PAD_BUTTON_UP | PAD_BUTTON_DOWN)) {
+            sel ^= 1;
+        }
+        if (down & PAD_BUTTON_A) {
+            return sel;
+        }
+    }
+}
+
+static void mapping_wizard(void) {
+    struct map_entry map[64];
+    u8 dev, st, args[8];
+    u32 btns;
+    s8 ax[GC_APP_AXIS_CNT];
+    int chan, i, s, n = 0, port = 0, tries;
+    int trig_mode, total, shown = 0;
+
+    /* Asked while libogc can still read the GameCube pad, before the manual
+     * transfers take the bus. */
+    trig_mode = trigger_mode_menu();
+    if (trig_mode < 0) {
+        return;
+    }
+    total = CAPTURE_STEP_CNT + ((trig_mode == TRIG_SEPARATE) ? 2 : 0);
+
+    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+
+    chan = ota_find_adapter();
+    if (chan < 0) {
+        printf("\nNo BlueRetro adapter answered on any port.\n");
+        SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+        return;
+    }
+
+    /* Whichever device last reported is the one being remapped. */
+    if (app_read_input(chan, &dev, &btns, ax) == 0 && dev != GC_APP_NO_DEV) {
+        port = dev;
+    }
+
+    printf("\x1b[2J\x1b[1;1H");
+    printf("Mapping wizard\n==============\n\n");
+    printf("  Remapping the controller on port %d.\n", port + 1);
+    printf("  It stops driving the game until this finishes.\n\n");
+    printf("  Press something on it to begin.\n");
+
+    /* Holding the output neutral also proves the adapter understood us. */
+    app_mode_send(chan, 1, (u8)port);
+    wait_neutral(chan);
+
+    for (s = 0; s < CAPTURE_STEP_CNT; s++) {
+        const struct capture_step *cs = &capture_steps[s];
+
+        if (cs->kind == CAP_BTN) {
+            int src = capture_button(chan, cs->prompt, ++shown, total);
+
+            if (src < 0) { goto cancelled; }
+            map[n].src = (u8)src;   map[n].dst = cs->dst;  map[n].dst_id = (u8)port;
+            map[n].max = 100;       map[n].thr = 50;       map[n].dz = 135;
+            map[n].turbo = 0;       n++;
+        }
+        else if (cs->kind == CAP_STICK) {
+            /* One sweep gives us the pair, so fill all four directions. */
+            int a = capture_axis(chan, cs->prompt, 0, 3, ++shown, total);
+            int base;
+
+            if (a < 0) { goto cancelled; }
+            base = (a < 2) ? 0 : 4;     /* source pair: LX/LY or RX/RY */
+            for (i = 0; i < 4; i++) {
+                map[n].src = (u8)(base + i);      map[n].dst = (u8)(cs->dst_axis + i);
+                map[n].dst_id = (u8)port;         map[n].max = 100;
+                map[n].thr = 50;                  map[n].dz = 135;
+                map[n].turbo = 0;                 n++;
+            }
+        }
+        else {
+            int a = capture_axis(chan, cs->prompt, 4, 5, ++shown, total);
+            u8 src, click;
+
+            if (a < 0) { goto cancelled; }
+            src = (a == 4) ? PAD_LM : PAD_RM;
+            click = (cs->dst_axis == PAD_LM) ? PAD_LT : PAD_RT;
+
+            map[n].src = src;  map[n].dst = cs->dst_axis;  map[n].dst_id = (u8)port;
+            map[n].max = 100;  map[n].thr = 50;            map[n].dz = 135;
+            map[n].turbo = 0;  n++;
+
+            if (trig_mode == TRIG_DERIVED) {
+                /* No switch to capture, so fire the click off the axis. */
+                map[n].src = src;  map[n].dst = click;     map[n].dst_id = (u8)port;
+                map[n].max = 100;  map[n].thr = TRIGGER_CLICK_THRESHOLD;
+                map[n].dz = 135;   map[n].turbo = 0;       n++;
+            }
+            else {
+                /* Real microswitch: take it as its own button, so the click
+                 * lands exactly where the hardware says rather than wherever
+                 * the analog range happens to put 95%. */
+                const char *cp = (cs->dst_axis == PAD_LM)
+                    ? "L click - press past the bump, until it clicks"
+                    : "R click - press past the bump, until it clicks";
+                int cb = capture_button(chan, cp, ++shown, total);
+
+                if (cb < 0) { goto cancelled; }
+
+                map[n].src = (u8)cb;  map[n].dst = click;  map[n].dst_id = (u8)port;
+                map[n].max = 100;     map[n].thr = 50;     map[n].dz = 135;
+                map[n].turbo = 0;     n++;
+            }
+        }
+    }
+
+    for (i = 0; i < BR_COMBO_CNT; i++) {
+        map[n].src = combo_src[i];  map[n].dst = (u8)(BR_COMBO_BASE_1 + i);
+        map[n].dst_id = (u8)port;   map[n].max = 100;
+        map[n].thr = 50;            map[n].dz = 135;
+        map[n].turbo = 0;           n++;
+    }
+
+    printf("\x1b[2J\x1b[1;1H");
+    printf("Mapping wizard\n==============\n\n  Saving %d entries...\n", n);
+
+    args[0] = (u8)port;
+    app_map_send(chan, GC_APP_MAP_BEGIN, args, 1);
+    for (i = 0; i < n; i++) {
+        args[0] = (u8)i;            args[1] = map[i].src;
+        args[2] = map[i].dst;       args[3] = map[i].dst_id;
+        args[4] = map[i].max;       args[5] = map[i].thr;
+        args[6] = map[i].dz;        args[7] = map[i].turbo;
+        if (app_map_send(chan, GC_APP_MAP_SET, args, 8) < 0) {
+            printf("\n  Transfer failed at entry %d.\n", i);
+            goto cancelled;
+        }
+    }
+    args[0] = (u8)n;
+    app_map_send(chan, GC_APP_MAP_COMMIT, args, 1);
+
+    st = GC_APP_ST_BUSY;
+    for (tries = 0; tries < 300; tries++) {
+        if (app_read_status(chan, &st) == 0
+                && (st == GC_APP_ST_OK || st == GC_APP_ST_ERROR)) {
+            break;
+        }
+        usleep(10000);
+    }
+
+    app_mode_send(chan, 0, (u8)port);
+    SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+
+    printf("\x1b[2J\x1b[1;1H");
+    if (st == GC_APP_ST_OK) {
+        printf("Mapping saved.\n\n  %d entries written to port %d.\n", n, port + 1);
+        printf("  It takes effect immediately, no restart.\n");
+    }
+    else {
+        printf("Mapping NOT saved.\n\n  The adapter reported status %u.\n", st);
+        printf("  Your previous mapping is untouched.\n");
+    }
+    return;
+
+cancelled:
+    app_map_send(chan, GC_APP_MAP_CANCEL, NULL, 0);
+    app_mode_send(chan, 0, (u8)port);
+    SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    printf("\x1b[2J\x1b[1;1H");
+    printf("Cancelled. Nothing was changed.\n");
+}
+
+/* Returns 0 firmware update, 1 input viewer, 2 mapping wizard. */
 static int main_menu(void) {
     int sel = 0;
 
@@ -349,6 +783,7 @@ static int main_menu(void) {
         printf("===================\n\n");
         printf("   %s Update firmware\n", sel == 0 ? ">" : " ");
         printf("   %s Live input viewer\n", sel == 1 ? ">" : " ");
+        printf("   %s Remap a controller\n", sel == 2 ? ">" : " ");
         printf("\n  D-pad to choose, A to select, START to exit.\n");
 
         do {
@@ -360,8 +795,11 @@ static int main_menu(void) {
         if (down & PAD_BUTTON_START) {
             exit(0);
         }
-        if (down & (PAD_BUTTON_UP | PAD_BUTTON_DOWN)) {
-            sel ^= 1;
+        if (down & PAD_BUTTON_UP) {
+            sel = (sel + 2) % 3;
+        }
+        if (down & PAD_BUTTON_DOWN) {
+            sel = (sel + 1) % 3;
         }
         if (down & PAD_BUTTON_A) {
             printf("\x1b[2J\x1b[1;1H");
@@ -410,10 +848,19 @@ int main(int argc, char **argv) {
     video_init();
     PAD_Init();
 
-    /* The viewer needs no SD card, so offer the menu before touching FAT. */
-    if (main_menu() == 1) {
-        input_viewer();
-        wait_exit();
+    /* Neither the viewer nor the wizard needs an SD card, so offer the menu
+     * before touching FAT. */
+    {
+        int choice = main_menu();
+
+        if (choice == 1) {
+            input_viewer();
+            wait_exit();
+        }
+        else if (choice == 2) {
+            mapping_wizard();
+            wait_exit();
+        }
     }
 
     printf("\n\nBlueRetro GameCube firmware updater\n");
