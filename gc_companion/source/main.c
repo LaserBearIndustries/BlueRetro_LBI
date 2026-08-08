@@ -2,15 +2,15 @@
  * Copyright (c) 2026, Laser Bear Industries
  * SPDX-License-Identifier: Apache-2.0
  *
- * BlueRetro firmware updater for GameCube.
+ * BlueRetro Companion for GameCube.
  *
- * Streams a firmware image into the adapter's OTA partition over the controller
- * port, using the vendor SI opcodes BlueRetro exposes when built with
- * CONFIG_BLUERETRO_GC_OTA. Intended as a recovery path for when the Bluetooth
- * stack is the thing that needs replacing.
+ * Talks to a BlueRetro adapter over a controller port using the vendor SI
+ * opcodes it exposes: remap a controller on screen, watch raw controller input,
+ * and update the adapter's firmware with no Bluetooth or serial adapter needed.
  *
- * Put blueretro.bin on the root of an SD card (SD Gecko or SD2SP2) and run this
- * from Swiss.
+ * The first two want firmware built with CONFIG_BLUERETRO_GC_APP, the last with
+ * CONFIG_BLUERETRO_GC_OTA. Run it from Swiss; updating additionally wants
+ * blueretro.bin on the root of the SD card.
  */
 
 #include <stdio.h>
@@ -122,6 +122,8 @@ static void *xfb = NULL;
 static GXRModeObj *rmode = NULL;
 
 static volatile u32 si_done = 0;
+
+static u16 pad_any_down(void);
 
 static void si_cb(s32 chan, u32 type) {
     (void)chan;
@@ -578,7 +580,7 @@ static int capture_axis(int chan, const char *prompt, int first, int last,
  * button, while an Xbox pad is analog all the way down and has nothing to
  * capture. Deriving the click from the axis is right for the latter and wrong
  * for the former, where it would fire before the switch does. */
-enum { TRIG_DERIVED = 0, TRIG_SEPARATE };
+enum { TRIG_DERIVED = 0, TRIG_SEPARATE, TRIG_DIGITAL, TRIG_MODE_CNT };
 
 static int trigger_mode_menu(void) {
     int sel = 0;
@@ -588,25 +590,29 @@ static int trigger_mode_menu(void) {
 
         printf("\x1b[2J\x1b[1;1H");
         printf("Mapping wizard\n==============\n\n");
-        printf("  How do your triggers work?\n\n");
-        printf("   %s Analog only, click derived at %d%%\n", sel == 0 ? ">" : " ",
+        printf("  How do your L and R triggers work?\n\n");
+        printf("   %s Analog, click derived at %d%%\n", sel == 0 ? ">" : " ",
             TRIGGER_CLICK_THRESHOLD);
-        printf("     for Xbox and similar, no switch at the bottom\n\n");
+        printf("     Xbox and similar, no switch at the bottom\n\n");
         printf("   %s Analog plus a real full pull click\n", sel == 1 ? ">" : " ");
-        printf("     for GameCube and NSO pads, captured separately\n");
+        printf("     GameCube and NSO pads, click captured separately\n\n");
+        printf("   %s Digital only, no analog travel\n", sel == 2 ? ">" : " ");
+        printf("     Switch Pro and similar, buttons rather than triggers\n");
         printf("\n  D-pad to choose, A to start, B to go back.\n");
 
         do {
-            PAD_ScanPads();
-            down = PAD_ButtonsDown(0);
+            down = pad_any_down();
             VIDEO_WaitVSync();
         } while (!down);
 
         if (down & PAD_BUTTON_B) {
             return -1;
         }
-        if (down & (PAD_BUTTON_UP | PAD_BUTTON_DOWN)) {
-            sel ^= 1;
+        if (down & PAD_BUTTON_UP) {
+            sel = (sel + TRIG_MODE_CNT - 1) % TRIG_MODE_CNT;
+        }
+        if (down & PAD_BUTTON_DOWN) {
+            sel = (sel + 1) % TRIG_MODE_CNT;
         }
         if (down & PAD_BUTTON_A) {
             return sel;
@@ -614,7 +620,8 @@ static int trigger_mode_menu(void) {
     }
 }
 
-static void mapping_wizard(void) {
+/* Returns 1 if the user wants to map another controller. */
+static int mapping_wizard(void) {
     struct map_entry map[64];
     u8 dev, st, args[8];
     u32 btns;
@@ -626,7 +633,7 @@ static void mapping_wizard(void) {
      * transfers take the bus. */
     trig_mode = trigger_mode_menu();
     if (trig_mode < 0) {
-        return;
+        return 0;
     }
     total = CAPTURE_STEP_CNT + ((trig_mode == TRIG_SEPARATE) ? 2 : 0);
 
@@ -636,7 +643,7 @@ static void mapping_wizard(void) {
     if (chan < 0) {
         printf("\nNo BlueRetro adapter answered on any port.\n");
         SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
-        return;
+        return 0;
     }
 
     /* Whichever device last reported is the one being remapped. */
@@ -678,6 +685,25 @@ static void mapping_wizard(void) {
                 map[n].thr = 50;                  map[n].dz = 135;
                 map[n].turbo = 0;                 n++;
             }
+        }
+        else if (trig_mode == TRIG_DIGITAL) {
+            /* Nothing analog to wait for, so take it as a button. The console
+             * still reads L and R as an axis as well as a switch, so drive both
+             * from it: the axis to full, and the click. Without the axis entry
+             * anything that reads the analog value sees a trigger at rest. */
+            const char *dp = (cs->dst_axis == PAD_LM) ? "L  - press it" : "R  - press it";
+            u8 click = (cs->dst_axis == PAD_LM) ? PAD_LT : PAD_RT;
+            int db = capture_button(chan, dp, ++shown, total);
+
+            if (db < 0) { goto cancelled; }
+
+            map[n].src = (u8)db;  map[n].dst = cs->dst_axis;  map[n].dst_id = (u8)port;
+            map[n].max = 100;     map[n].thr = 50;            map[n].dz = 135;
+            map[n].turbo = 0;     n++;
+
+            map[n].src = (u8)db;  map[n].dst = click;         map[n].dst_id = (u8)port;
+            map[n].max = 100;     map[n].thr = 50;            map[n].dz = 135;
+            map[n].turbo = 0;     n++;
         }
         else {
             int a = capture_axis(chan, cs->prompt, 4, 5, ++shown, total);
@@ -761,7 +787,19 @@ static void mapping_wizard(void) {
         printf("Mapping NOT saved.\n\n  The adapter reported status %u.\n", st);
         printf("  Your previous mapping is untouched.\n");
     }
-    return;
+
+    printf("\n\n  A to map another controller, B to finish.\n");
+    for (;;) {
+        u16 down = pad_any_down();
+
+        if (down & PAD_BUTTON_A) {
+            return 1;
+        }
+        if (down & (PAD_BUTTON_B | PAD_BUTTON_START)) {
+            return 0;
+        }
+        VIDEO_WaitVSync();
+    }
 
 cancelled:
     app_map_send(chan, GC_APP_MAP_CANCEL, NULL, 0);
@@ -769,9 +807,21 @@ cancelled:
     SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
     printf("\x1b[2J\x1b[1;1H");
     printf("Cancelled. Nothing was changed.\n");
+    printf("\n\n  A to map another controller, B to finish.\n");
+    for (;;) {
+        u16 down = pad_any_down();
+
+        if (down & PAD_BUTTON_A) {
+            return 1;
+        }
+        if (down & (PAD_BUTTON_B | PAD_BUTTON_START)) {
+            return 0;
+        }
+        VIDEO_WaitVSync();
+    }
 }
 
-/* Returns 0 firmware update, 1 input viewer, 2 mapping wizard. */
+/* Returns 0 mapping wizard, 1 input viewer, 2 firmware update. */
 static int main_menu(void) {
     int sel = 0;
 
@@ -779,16 +829,15 @@ static int main_menu(void) {
         u16 down;
 
         printf("\x1b[2J\x1b[1;1H");
-        printf("BlueRetro companion\n");
+        printf("BlueRetro Companion\n");
         printf("===================\n\n");
-        printf("   %s Update firmware\n", sel == 0 ? ">" : " ");
+        printf("   %s Remap a controller\n", sel == 0 ? ">" : " ");
         printf("   %s Live input viewer\n", sel == 1 ? ">" : " ");
-        printf("   %s Remap a controller\n", sel == 2 ? ">" : " ");
+        printf("   %s Update firmware\n", sel == 2 ? ">" : " ");
         printf("\n  D-pad to choose, A to select, START to exit.\n");
 
         do {
-            PAD_ScanPads();
-            down = PAD_ButtonsDown(0);
+            down = pad_any_down();
             VIDEO_WaitVSync();
         } while (!down);
 
@@ -824,11 +873,24 @@ static void video_init(void) {
     }
 }
 
+/* Every port, not just the first. A controller that was just remapped onto port
+ * 2 is the one in the user's hands, and reading only pad 0 leaves them holding
+ * something the app ignores. */
+static u16 pad_any_down(void) {
+    u16 down = 0;
+    int i;
+
+    PAD_ScanPads();
+    for (i = 0; i < 4; i++) {
+        down |= PAD_ButtonsDown(i);
+    }
+    return down;
+}
+
 static void wait_exit(void) {
     printf("\nPress START to exit.\n");
     for (;;) {
-        PAD_ScanPads();
-        if (PAD_ButtonsDown(0) & PAD_BUTTON_START) {
+        if (pad_any_down() & PAD_BUTTON_START) {
             exit(0);
         }
         VIDEO_WaitVSync();
@@ -853,18 +915,23 @@ int main(int argc, char **argv) {
     {
         int choice = main_menu();
 
-        if (choice == 1) {
+        if (choice == 0) {
+            while (mapping_wizard()) {
+                /* Round again for the next controller. Press something on it
+                 * first: the wizard remaps whichever device reported last. */
+            }
+            wait_exit();
+        }
+        else if (choice == 1) {
             input_viewer();
             wait_exit();
         }
-        else if (choice == 2) {
-            mapping_wizard();
-            wait_exit();
-        }
+        /* Anything else falls through to the firmware update below. Both of the
+         * branches above end in wait_exit(), which does not return. */
     }
 
-    printf("\n\nBlueRetro GameCube firmware updater\n");
-    printf("===================================\n\n");
+    printf("\n\nBlueRetro Companion - firmware update\n");
+    printf("=====================================\n\n");
 
     if (!fatInitDefault()) {
         printf("No FAT device. Need an SD Gecko or SD2SP2.\n");
