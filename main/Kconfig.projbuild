@@ -69,6 +69,24 @@ menu "BlueRetro"
 
             Costs a small snapshot on every controller report. Prototype.
 
+    config BLUERETRO_CTRL_MAP
+        bool "Remember mappings per controller rather than per port"
+        default n
+        help
+            Mappings normally belong to a console port, so changing which
+            controller connects first hands one pad another's layout.
+
+            With this on, a mapping made with the GameCube app is also saved
+            against that controller's Bluetooth address and reloaded whenever
+            it connects, on whichever port it lands. Stored as small files
+            beside the config rather than inside it, so the config layout that
+            the web tool and the config version machinery depend on is left
+            alone.
+
+            A controller that has never been mapped keeps whatever the port
+            already had. One using a rotating private address will not be
+            recognised again once it changes.
+
     config BLUERETRO_GC_FACE_MAP_TOGGLE
         bool "Let PAD_MS flip the GameCube face buttons between layouts"
         default n

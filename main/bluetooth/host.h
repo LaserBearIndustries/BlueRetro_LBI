@@ -29,6 +29,7 @@ enum {
     BT_DEV_HID_INTR_PENDING,
     BT_DEV_HID_INTR_READY,
     BT_DEV_HID_INIT_DONE,
+    BT_DEV_MAP_LOADED,
     BT_DEV_SDP_DATA,
     BT_DEV_ROLE_SW_FAIL,
     BT_DEV_IS_BLE,
@@ -132,6 +133,7 @@ extern struct bt_hci_pkt bt_hci_pkt_tmp;
 
 uint32_t bt_host_get_flag_dev_cnt(uint32_t flag);
 void bt_host_disconnect_all(void);
+const uint8_t *bt_host_dev_bdaddr(struct bt_dev *device);
 void bt_host_le_pair_failed(bt_addr_le_t *addr);
 uint32_t bt_host_le_is_pair_failed(bt_addr_le_t *addr);
 void bt_host_le_pair_fail_clear(void);

@@ -106,6 +106,8 @@ void hw_config_patch(void);
 void config_init(uint32_t src);
 void config_update(uint32_t dst);
 uint32_t config_get_src(void);
+int32_t config_load_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr);
+int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr);
 void config_debug_log(void);
 
 #endif /* _CONFIG_H_ */

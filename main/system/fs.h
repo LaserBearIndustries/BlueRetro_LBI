@@ -14,6 +14,8 @@
 #define MEMORY_CARD_FILE "/fs/mc.bin"
 #define PWR_STATE_FILE "/fs/pwr_state.bin"
 #define BITSTREAM_FILE "/fs/bitstream.bit"
+/* Per controller mappings are this prefix plus the address in hex. */
+#define CTRL_MAP_FILE_PFX "/fs/m_"
 
 int32_t fs_init(void);
 void fs_reset(void);

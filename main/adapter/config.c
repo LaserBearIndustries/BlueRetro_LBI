@@ -560,6 +560,112 @@ uint32_t config_get_src(void) {
     return config_src;
 }
 
+#ifdef CONFIG_BLUERETRO_CTRL_MAP
+/* Per controller mappings live in their own small files keyed by address, the
+ * same way per game configs key off the game id. Deliberately kept out of
+ * struct config: adding a field there changes the layout the web config and the
+ * config version machinery both depend on, for what is really a side table. */
+#define CTRL_MAP_MAGIC 0x50414D42 /* BMAP */
+#define CTRL_MAP_VER 1
+
+struct ctrl_map_hdr {
+    uint32_t magic;
+    uint8_t version;
+    uint8_t map_size;
+    uint8_t reserved[2];
+} __packed;
+
+static void ctrl_map_filename(char *out, uint32_t len, const uint8_t *bdaddr) {
+    snprintf(out, len, "%s%02X%02X%02X%02X%02X%02X", CTRL_MAP_FILE_PFX,
+        bdaddr[5], bdaddr[4], bdaddr[3], bdaddr[2], bdaddr[1], bdaddr[0]);
+}
+
+int32_t config_load_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr) {
+    char filename[32];
+    struct ctrl_map_hdr hdr;
+    FILE *file;
+
+    if (out_idx >= WIRED_MAX_DEV || bdaddr == NULL) {
+        return -1;
+    }
+
+    ctrl_map_filename(filename, sizeof(filename), bdaddr);
+    file = fopen(filename, "rb");
+    if (file == NULL) {
+        /* Never mapped, so whatever the port already has stands. */
+        return -1;
+    }
+
+    if (fread(&hdr, sizeof(hdr), 1, file) != 1 || hdr.magic != CTRL_MAP_MAGIC
+            || hdr.version != CTRL_MAP_VER
+            || hdr.map_size == 0 || hdr.map_size > ADAPTER_MAPPING_MAX) {
+        fclose(file);
+        printf("# %s: %s unusable, ignoring\n", __FUNCTION__, filename);
+        return -1;
+    }
+
+    if (fread(config.in_cfg[out_idx].map_cfg, sizeof(struct map_cfg),
+            hdr.map_size, file) != hdr.map_size) {
+        fclose(file);
+        printf("# %s: %s truncated, ignoring\n", __FUNCTION__, filename);
+        return -1;
+    }
+    fclose(file);
+
+    config.in_cfg[out_idx].map_size = hdr.map_size;
+
+    /* A stored map carries the dst_id of whatever port it was made on, so
+     * retarget it or the controller ends up driving a different port. */
+    for (uint32_t i = 0; i < hdr.map_size; i++) {
+        config.in_cfg[out_idx].map_cfg[i].dst_id = out_idx;
+    }
+
+    printf("# %s: %s -> port %lu, %u entries\n", __FUNCTION__, filename,
+        out_idx, hdr.map_size);
+    return 0;
+}
+
+int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr) {
+    char filename[32];
+    struct ctrl_map_hdr hdr = {
+        .magic = CTRL_MAP_MAGIC,
+        .version = CTRL_MAP_VER,
+        .reserved = {0, 0},
+    };
+    FILE *file;
+    uint32_t cnt;
+
+    if (out_idx >= WIRED_MAX_DEV || bdaddr == NULL) {
+        return -1;
+    }
+
+    cnt = config.in_cfg[out_idx].map_size;
+    if (cnt == 0 || cnt > ADAPTER_MAPPING_MAX) {
+        return -1;
+    }
+    hdr.map_size = (uint8_t)cnt;
+
+    ctrl_map_filename(filename, sizeof(filename), bdaddr);
+    file = fopen(filename, "wb");
+    if (file == NULL) {
+        printf("# %s: failed to open %s for writing\n", __FUNCTION__, filename);
+        return -1;
+    }
+
+    if (fwrite(&hdr, sizeof(hdr), 1, file) != 1
+            || fwrite(config.in_cfg[out_idx].map_cfg, sizeof(struct map_cfg),
+                cnt, file) != cnt) {
+        fclose(file);
+        printf("# %s: short write to %s\n", __FUNCTION__, filename);
+        return -1;
+    }
+    fclose(file);
+
+    printf("# %s: %s saved, %lu entries\n", __FUNCTION__, filename, cnt);
+    return 0;
+}
+#endif /* CONFIG_BLUERETRO_CTRL_MAP */
+
 void config_debug_log(void) {
         bt_mon_log(true,
             "Global config: system: 0x%02X multitap: 0x%02X inquiry: 0x%02X banksel: 0x%02X",

@@ -498,6 +498,18 @@ void bt_host_le_pair_fail_clear(void) {
     le_pair_fail_cnt = 0;
 }
 
+/* BR/EDR and BLE keep the address in different places. Everything that wants to
+ * identify a controller wants whichever one applies. */
+const uint8_t *bt_host_dev_bdaddr(struct bt_dev *device) {
+    if (device == NULL) {
+        return NULL;
+    }
+    if (atomic_test_bit(&device->flags, BT_DEV_IS_BLE)) {
+        return device->le_remote_bdaddr.a.val;
+    }
+    return device->remote_bdaddr;
+}
+
 int32_t bt_host_get_new_dev(struct bt_dev **device) {
     for (uint32_t i = 0; i < BT_MAX_DEV; i++) {
         if (!atomic_test_bit(&bt_dev[i].flags, BT_DEV_DEVICE_FOUND)) {
@@ -785,6 +797,17 @@ int32_t bt_host_get_next_accept_le_bdaddr(bt_addr_le_t *le_bdaddr) {
 void bt_host_bridge(struct bt_dev *device, uint8_t report_id, uint8_t *data, uint32_t len) {
     struct bt_data *bt_data = &bt_adapter.data[device->ids.id];
     uint32_t report_type = PAD;
+
+#ifdef CONFIG_BLUERETRO_CTRL_MAP
+    /* Every controller type funnels its reports through here, which is the one
+     * place the device and its port are both known regardless of how it
+     * identified itself. Hooking the six per type init paths instead would be
+     * six chances to miss one. */
+    if (!atomic_test_bit(&device->flags, BT_DEV_MAP_LOADED)) {
+        atomic_set_bit(&device->flags, BT_DEV_MAP_LOADED);
+        config_load_ctrl_map(device->ids.out_idx, bt_host_dev_bdaddr(device));
+    }
+#endif
 
 #ifdef CONFIG_BLUERETRO_BT_TIMING_TESTS
     atomic_set_bit(&bt_flags, BT_HOST_DBG_MODE);

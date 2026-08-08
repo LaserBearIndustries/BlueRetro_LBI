@@ -10,6 +10,7 @@
 #include <esp_attr.h>
 #include "adapter/adapter.h"
 #include "adapter/config.h"
+#include "bluetooth/host.h"
 #include "gc_app.h"
 
 /* A snapshot rather than a pointer to ctrl_input. That buffer is scratch space
@@ -186,6 +187,18 @@ static void gc_app_task(void *arg) {
                         map_status = GC_APP_ST_OK;
                         printf("# %s: port %u mapping committed, %u entries\n",
                             __FUNCTION__, port, cnt);
+#ifdef CONFIG_BLUERETRO_CTRL_MAP
+                        /* Also keep it against the controller itself, so it
+                         * follows the pad rather than the port it happened to
+                         * land on this session. */
+                        {
+                            struct bt_dev *dev = NULL;
+
+                            if (bt_host_get_dev_from_out_idx(port, &dev) >= 0) {
+                                config_save_ctrl_map(port, bt_host_dev_bdaddr(dev));
+                            }
+                        }
+#endif
                     }
                     else {
                         map_status = GC_APP_ST_ERROR;
