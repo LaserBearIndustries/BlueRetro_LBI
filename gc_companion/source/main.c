@@ -124,6 +124,9 @@ static GXRModeObj *rmode = NULL;
 static volatile u32 si_done = 0;
 
 static u16 pad_any_down(void);
+static u16 pad_any_held(void);
+static void pad_settle(void);
+static int prompt_again(void);
 
 static void si_cb(s32 chan, u32 type) {
     (void)chan;
@@ -362,7 +365,7 @@ static void input_viewer(void) {
     if (chan < 0) {
         printf("\nNo BlueRetro adapter answered on any port.\n");
         printf("Is the firmware built with CONFIG_BLUERETRO_GC_APP?\n");
-        SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+        pad_settle();
         return;
     }
 
@@ -400,7 +403,7 @@ static void input_viewer(void) {
         VIDEO_WaitVSync();
     }
 
-    SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    pad_settle();
     printf("\x1b[2J\x1b[1;1H");
 }
 
@@ -642,7 +645,7 @@ static int mapping_wizard(void) {
     chan = ota_find_adapter();
     if (chan < 0) {
         printf("\nNo BlueRetro adapter answered on any port.\n");
-        SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+        pad_settle();
         return 0;
     }
 
@@ -776,7 +779,7 @@ static int mapping_wizard(void) {
     }
 
     app_mode_send(chan, 0, (u8)port);
-    SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    pad_settle();
 
     printf("\x1b[2J\x1b[1;1H");
     if (st == GC_APP_ST_OK) {
@@ -788,37 +791,19 @@ static int mapping_wizard(void) {
         printf("  Your previous mapping is untouched.\n");
     }
 
-    printf("\n\n  A to map another controller, B to finish.\n");
-    for (;;) {
-        u16 down = pad_any_down();
-
-        if (down & PAD_BUTTON_A) {
-            return 1;
-        }
-        if (down & (PAD_BUTTON_B | PAD_BUTTON_START)) {
-            return 0;
-        }
-        VIDEO_WaitVSync();
-    }
+    printf("\n\n  Hold A to map another controller.\n");
+    printf("  Hold B or START to finish.\n");
+    return prompt_again();
 
 cancelled:
     app_map_send(chan, GC_APP_MAP_CANCEL, NULL, 0);
     app_mode_send(chan, 0, (u8)port);
-    SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    pad_settle();
     printf("\x1b[2J\x1b[1;1H");
     printf("Cancelled. Nothing was changed.\n");
-    printf("\n\n  A to map another controller, B to finish.\n");
-    for (;;) {
-        u16 down = pad_any_down();
-
-        if (down & PAD_BUTTON_A) {
-            return 1;
-        }
-        if (down & (PAD_BUTTON_B | PAD_BUTTON_START)) {
-            return 0;
-        }
-        VIDEO_WaitVSync();
-    }
+    printf("\n\n  Hold A to map another controller.\n");
+    printf("  Hold B or START to finish.\n");
+    return prompt_again();
 }
 
 /* Returns 0 mapping wizard, 1 input viewer, 2 firmware update. */
@@ -885,6 +870,62 @@ static u16 pad_any_down(void) {
         down |= PAD_ButtonsDown(i);
     }
     return down;
+}
+
+static u16 pad_any_held(void) {
+    u16 held = 0;
+    int i;
+
+    PAD_ScanPads();
+    for (i = 0; i < 4; i++) {
+        held |= PAD_ButtonsHeld(i);
+    }
+    return held;
+}
+
+/* libogc's pad driver needs a moment after polling is handed back before its
+ * edge state means anything, and the freshly remapped controller is driving
+ * these same ports. Burn a few frames and throw the edges away, or the first
+ * read can answer a prompt nobody has seen yet. */
+static void pad_settle(void) {
+    int i;
+
+    SI_EnablePolling(SI_CHAN0_BIT|SI_CHAN1_BIT|SI_CHAN2_BIT|SI_CHAN3_BIT);
+    for (i = 0; i < 20; i++) {
+        PAD_ScanPads();
+        VIDEO_WaitVSync();
+    }
+}
+
+/* Waits for a sustained hold rather than an edge. A remapped controller can
+ * produce spurious edges, from a stick sitting near a threshold or a button
+ * still down from the last capture, and a single stray edge should not decide
+ * whether the wizard runs again. Returns 1 for A, 0 for B or Start. */
+static int prompt_again(void) {
+    int a = 0, b = 0;
+
+    for (;;) {
+        u16 held = pad_any_held();
+
+        if (held & PAD_BUTTON_A) {
+            if (++a > 25) {
+                return 1;
+            }
+        }
+        else {
+            a = 0;
+        }
+
+        if (held & (PAD_BUTTON_B | PAD_BUTTON_START)) {
+            if (++b > 25) {
+                return 0;
+            }
+        }
+        else {
+            b = 0;
+        }
+        VIDEO_WaitVSync();
+    }
 }
 
 static void wait_exit(void) {
@@ -959,7 +1000,7 @@ int main(int argc, char **argv) {
     if (chan < 0) {
         printf("No BlueRetro adapter answered on any port.\n");
         printf("Is the firmware built with CONFIG_BLUERETRO_GC_OTA?\n");
-        SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+        pad_settle();
         fclose(f);
         wait_exit();
     }
@@ -989,21 +1030,18 @@ int main(int argc, char **argv) {
 
         /* Reading buttons means letting libogc poll again, so hand the bus back
          * for the prompt and take it again before the transfer starts. */
-        SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+        pad_settle();
 
         printf("\nPress A to flash, B to cancel.\n");
         for (;;) {
-            u16 down;
-
-            PAD_ScanPads();
-            down = PAD_ButtonsDown(0);
+            u16 down = pad_any_down();
 
             if (down & PAD_BUTTON_A) {
                 break;
             }
             if (down & PAD_BUTTON_B) {
                 printf("\nCancelled. Nothing was written.\n");
-                SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+                pad_settle();
                 fclose(f);
                 wait_exit();
             }
@@ -1095,14 +1133,14 @@ int main(int argc, char **argv) {
         }
     }
 
-    SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    pad_settle();
     fclose(f);
     wait_exit();
     return 0;
 
 fail:
     ota_send(chan, GC_OTA_SUB_ABORT, 0, NULL);
-    SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    pad_settle();
     fclose(f);
     printf("\nUpdate aborted. The adapter kept its current firmware.\n");
     wait_exit();
