@@ -125,6 +125,44 @@ static uint32_t config_version_magic[] = {
 static uint8_t config_default_combo[BR_COMBO_CNT] = {
     PAD_LM, PAD_RM, PAD_MQ, PAD_RB_UP, PAD_RB_DOWN, PAD_RB_RIGHT, PAD_RB_LEFT, PAD_LD_UP, PAD_LD_DOWN, PAD_MS
 };
+
+/* A GameCube build only ever drives GameCube pads, so the stock keyboard and
+ * mouse identity map is dead weight. Map exactly what the console has, plus the
+ * two derived entries that turn a full analog trigger pull into the digital
+ * click: the GameCube reports L and R both as an axis and as a switch, and games
+ * expect the switch once the trigger bottoms out. */
+struct config_default_map {
+    uint8_t src_btn;
+    uint8_t dst_btn;
+    uint8_t perc_threshold;
+};
+
+static const struct config_default_map config_default_map[] = {
+    {PAD_LX_LEFT,  PAD_LX_LEFT,  50},
+    {PAD_LX_RIGHT, PAD_LX_RIGHT, 50},
+    {PAD_LY_DOWN,  PAD_LY_DOWN,  50},
+    {PAD_LY_UP,    PAD_LY_UP,    50},
+    {PAD_RX_LEFT,  PAD_RX_LEFT,  50},
+    {PAD_RX_RIGHT, PAD_RX_RIGHT, 50},
+    {PAD_RY_DOWN,  PAD_RY_DOWN,  50},
+    {PAD_RY_UP,    PAD_RY_UP,    50},
+    {PAD_LD_LEFT,  PAD_LD_LEFT,  50},
+    {PAD_LD_RIGHT, PAD_LD_RIGHT, 50},
+    {PAD_LD_DOWN,  PAD_LD_DOWN,  50},
+    {PAD_LD_UP,    PAD_LD_UP,    50},
+    {PAD_RB_LEFT,  PAD_RB_LEFT,  50},
+    {PAD_RB_RIGHT, PAD_RB_RIGHT, 50},
+    {PAD_RB_DOWN,  PAD_RB_DOWN,  50},
+    {PAD_RB_UP,    PAD_RB_UP,    50},
+    {PAD_MM,       PAD_MM,       50},
+    {PAD_LM,       PAD_LM,       50},
+    {PAD_LM,       PAD_LT,       95},
+    {PAD_LS,       PAD_LS,       50},
+    {PAD_RM,       PAD_RM,       50},
+    {PAD_RM,       PAD_RT,       95},
+    {PAD_RS,       PAD_RS,       50},
+};
+#define CONFIG_DEFAULT_MAP_CNT ARRAY_SIZE(config_default_map)
 #else
 static uint8_t config_default_combo[BR_COMBO_CNT] = {
     PAD_LM, PAD_RM, PAD_MM, PAD_RB_UP, PAD_RB_LEFT, PAD_RB_RIGHT, PAD_RB_DOWN, PAD_LD_UP, PAD_LD_DOWN, PAD_MS
@@ -239,11 +277,28 @@ static void config_init_struct(struct config *data) {
 
     for (uint32_t i = 0; i < WIRED_MAX_DEV; i++) {
         data->out_cfg[i].dev_mode = DEV_PAD;
+#ifdef CONFIG_BLUERETRO_SYSTEM_GC
+        data->out_cfg[i].acc_mode = ACC_RUMBLE;
+#else
         data->out_cfg[i].acc_mode = ACC_NONE;
+#endif
         data->in_cfg[i].bt_dev_id = 0x00; /* Not used placeholder */
         data->in_cfg[i].bt_subdev_id = 0x00;  /* Not used placeholder */
-        data->in_cfg[i].map_size = KBM_MAX + BR_COMBO_CNT;
         uint32_t j = 0;
+#ifdef CONFIG_BLUERETRO_SYSTEM_GC
+        data->in_cfg[i].map_size = CONFIG_DEFAULT_MAP_CNT + BR_COMBO_CNT;
+        for (; j < CONFIG_DEFAULT_MAP_CNT; j++) {
+            data->in_cfg[i].map_cfg[j].src_btn = config_default_map[j].src_btn;
+            data->in_cfg[i].map_cfg[j].dst_btn = config_default_map[j].dst_btn;
+            data->in_cfg[i].map_cfg[j].dst_id = i;
+            data->in_cfg[i].map_cfg[j].perc_max = 100;
+            data->in_cfg[i].map_cfg[j].perc_threshold = config_default_map[j].perc_threshold;
+            data->in_cfg[i].map_cfg[j].perc_deadzone = 135;
+            data->in_cfg[i].map_cfg[j].turbo = 0;
+            data->in_cfg[i].map_cfg[j].algo = 0;
+        }
+#else
+        data->in_cfg[i].map_size = KBM_MAX + BR_COMBO_CNT;
         for (; j < KBM_MAX; j++) {
             data->in_cfg[i].map_cfg[j].src_btn = j;
             data->in_cfg[i].map_cfg[j].dst_btn = j;
@@ -254,6 +309,7 @@ static void config_init_struct(struct config *data) {
             data->in_cfg[i].map_cfg[j].turbo = 0;
             data->in_cfg[i].map_cfg[j].algo = 0;
         }
+#endif
         for (uint32_t k = 0; k < BR_COMBO_CNT; j++, k++) {
             data->in_cfg[i].map_cfg[j].src_btn = config_default_combo[k];
             data->in_cfg[i].map_cfg[j].dst_btn = k + BR_COMBO_BASE_1;
