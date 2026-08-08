@@ -58,6 +58,17 @@ menu "BlueRetro"
             flushed a kilobyte at a time; the status opcode reports busy while
             flash is being written so the console knows to wait. Prototype.
 
+    config BLUERETRO_GC_APP
+        bool "Expose adapter state to the GameCube companion app"
+        default n
+        help
+            Adds vendor SI opcode 0x21, which reports the raw controller state
+            as it arrives over Bluetooth, before any mapping is applied. Lets
+            GameCube homebrew show a live input viewer, and is the groundwork
+            for an on screen mapping wizard.
+
+            Costs a small snapshot on every controller report. Prototype.
+
     choice
         prompt "Select universal or specific system"
         default BLUERETRO_SYSTEM_UNIVERSAL

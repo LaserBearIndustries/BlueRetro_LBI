@@ -22,6 +22,7 @@
 #include "system/gpio.h"
 #include "system/intr.h"
 #include "system/gc_ota.h"
+#include "system/gc_app.h"
 #include "nsi.h"
 
 #define BIT_ZERO 0x80020006
@@ -51,6 +52,10 @@
 #define GC_OTA_CMD 0x1E
 #define GC_OTA_STATUS_CMD 0x1F
 #define GC_OTA_VER_CMD 0x20
+
+/* Raw pre mapping controller state, for the companion app's input viewer and
+ * later its mapping wizard. */
+#define GC_APP_INPUT_CMD 0x21
 
 #define RMT_MEM_ITEM_NUM SOC_RMT_MEM_WORDS_PER_CHANNEL
 
@@ -268,6 +273,16 @@ static void nsi_ota_status_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     RMT.conf_ch[channel].conf1.tx_start = 1;
 }
 
+#ifdef CONFIG_BLUERETRO_GC_APP
+static void nsi_app_input_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    uint8_t crc;
+
+    gc_app_input_read(buf);
+    nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, GC_APP_INPUT_LEN, &crc, STOP_BIT_2US);
+    RMT.conf_ch[channel].conf1.tx_start = 1;
+}
+#endif
+
 static void nsi_ota_version_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     uint8_t crc;
     uint8_t chunk;
@@ -463,6 +478,11 @@ static void gc_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
             nsi_ota_version_hdlr(channel, port, item);
             break;
 #endif
+#ifdef CONFIG_BLUERETRO_GC_APP
+        case GC_APP_INPUT_CMD:
+            nsi_app_input_hdlr(channel, port, item);
+            break;
+#endif
         case 0x00:
         case 0xFF:
             nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, gc_kb_ident, sizeof(gc_kb_ident), &crc, STOP_BIT_2US);
@@ -501,6 +521,11 @@ static void gc_pad_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
             break;
         case GC_OTA_VER_CMD:
             nsi_ota_version_hdlr(channel, port, item);
+            break;
+#endif
+#ifdef CONFIG_BLUERETRO_GC_APP
+        case GC_APP_INPUT_CMD:
+            nsi_app_input_hdlr(channel, port, item);
             break;
 #endif
         case 0x00:

@@ -22,6 +22,7 @@
 #include "wireless/wireless.h"
 #include "macro.h"
 #include "bluetooth/host.h"
+#include "system/gc_app.h"
 #include "tests/cmds.h"
 
 const uint32_t hat_to_ld_btns[16] = {
@@ -426,6 +427,11 @@ void adapter_bridge(struct bt_data *bt_data) {
 #ifdef CONFIG_BLUERETRO_ADAPTER_INPUT_DBG
         TESTS_CMDS_LOG("\"generic_input\": {");
         adapter_debug_wireless_print(ctrl_input);
+#endif
+#ifdef CONFIG_BLUERETRO_GC_APP
+        /* Snapshot before mapping: the app wants to know which button was
+         * actually pressed, not what it currently maps to. */
+        gc_app_input_update(bt_data->base.pids->out_idx, ctrl_input);
 #endif
         if (wired_adapter.system_id != WIRED_AUTO) {
             if (wired_meta_init(ctrl_output)) {

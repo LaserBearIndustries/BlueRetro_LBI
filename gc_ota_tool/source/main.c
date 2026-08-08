@@ -45,6 +45,12 @@
 #define GC_OTA_VER_LEN 32
 #define GC_OTA_VER_CHUNK 8
 
+/* Raw pre mapping controller state. Must match main/system/gc_app.h. */
+#define GC_APP_INPUT_CMD 0x21
+#define GC_APP_INPUT_LEN 12
+#define GC_APP_AXIS_CNT 6
+#define GC_APP_NO_DEV 0xFF
+
 /* Layout of esp_app_desc_t inside an ESP-IDF application image. The descriptor
  * sits right behind the 24 byte image header plus one 8 byte segment header. */
 #define APP_DESC_OFF 0x20
@@ -224,6 +230,146 @@ static int ota_find_adapter(void) {
     return -1;
 }
 
+/* Generic button ids, from the enum at main/adapter/adapter.h:108. */
+static const char *btn_name[32] = {
+    "LX_LEFT", "LX_RIGHT", "LY_DOWN", "LY_UP",
+    "RX_LEFT", "RX_RIGHT", "RY_DOWN", "RY_UP",
+    "LD_LEFT", "LD_RIGHT", "LD_DOWN", "LD_UP",
+    "RD_LEFT", "RD_RIGHT", "RD_DOWN", "RD_UP",
+    "RB_LEFT", "RB_RIGHT", "RB_DOWN", "RB_UP",
+    "MM", "MS", "MT", "MQ",
+    "LM", "LS", "LT", "LJ",
+    "RM", "RS", "RT", "RJ",
+};
+
+static const char *axis_name[GC_APP_AXIS_CNT] = { "LX", "LY", "RX", "RY", "L ", "R " };
+
+static int app_read_input(int chan, u8 *dev, u32 *btns, s8 *axes) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+    int i;
+
+    req[0] = GC_APP_INPUT_CMD;
+    memset(in, 0, sizeof(in));
+
+    if (si_xfer(chan, req, 1, in, GC_APP_INPUT_LEN) < 0) {
+        return -1;
+    }
+
+    *dev = in[0];
+    *btns = (u32)in[2] | ((u32)in[3] << 8) | ((u32)in[4] << 16) | ((u32)in[5] << 24);
+    for (i = 0; i < GC_APP_AXIS_CNT; i++) {
+        axes[i] = (s8)in[6 + i];
+    }
+    return 0;
+}
+
+/* Signed bar, -127..127, centre marked. */
+static void draw_axis(const char *name, s8 v) {
+    char bar[33];
+    int i, mid = 16, pos = mid + ((int)v * 15) / 127;
+
+    for (i = 0; i < 32; i++) {
+        bar[i] = (i == mid) ? '|' : '.';
+    }
+    if (pos < 0) { pos = 0; }
+    if (pos > 31) { pos = 31; }
+    bar[pos] = '#';
+    bar[32] = '\0';
+    printf("  %s [%s] %4d\n", name, bar, (int)v);
+}
+
+/* Reads the controller through opcode 0x21 rather than libogc's PAD driver.
+ * Polling has to stay off for the manual transfers, so the raw state we are
+ * already fetching doubles as the way back out of this screen. */
+static void input_viewer(void) {
+    u8 dev = GC_APP_NO_DEV;
+    u32 btns = 0;
+    s8 axes[GC_APP_AXIS_CNT];
+    int chan, i, held = 0;
+
+    memset(axes, 0, sizeof(axes));
+    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+
+    chan = ota_find_adapter();
+    if (chan < 0) {
+        printf("\nNo BlueRetro adapter answered on any port.\n");
+        printf("Is the firmware built with CONFIG_BLUERETRO_GC_APP?\n");
+        SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+        return;
+    }
+
+    for (;;) {
+        if (app_read_input(chan, &dev, &btns, axes) == 0) {
+            printf("\x1b[2J\x1b[1;1H");
+            printf("BlueRetro live input viewer\n");
+            printf("===========================\n\n");
+
+            if (dev == GC_APP_NO_DEV) {
+                printf("  Nothing has reported yet.\n");
+                printf("  Connect a controller and press something.\n");
+            }
+            else {
+                printf("  device %u        buttons 0x%08lx\n\n", dev, (unsigned long)btns);
+                for (i = 0; i < GC_APP_AXIS_CNT; i++) {
+                    draw_axis(axis_name[i], axes[i]);
+                }
+                printf("\n  pressed:");
+                for (i = 0; i < 32; i++) {
+                    if (btns & (1u << i)) {
+                        printf(" %s", btn_name[i]);
+                    }
+                }
+                printf("\n");
+            }
+            printf("\n  Hold Start to go back.\n");
+
+            /* A hold, not a tap. This screen exists to watch taps. */
+            held = (btns & (1u << 20)) ? held + 1 : 0;
+            if (held > 45) {
+                break;
+            }
+        }
+        VIDEO_WaitVSync();
+    }
+
+    SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    printf("\x1b[2J\x1b[1;1H");
+}
+
+/* Returns 0 for the firmware update, 1 for the input viewer. */
+static int main_menu(void) {
+    int sel = 0;
+
+    for (;;) {
+        u16 down;
+
+        printf("\x1b[2J\x1b[1;1H");
+        printf("BlueRetro companion\n");
+        printf("===================\n\n");
+        printf("   %s Update firmware\n", sel == 0 ? ">" : " ");
+        printf("   %s Live input viewer\n", sel == 1 ? ">" : " ");
+        printf("\n  D-pad to choose, A to select, START to exit.\n");
+
+        do {
+            PAD_ScanPads();
+            down = PAD_ButtonsDown(0);
+            VIDEO_WaitVSync();
+        } while (!down);
+
+        if (down & PAD_BUTTON_START) {
+            exit(0);
+        }
+        if (down & (PAD_BUTTON_UP | PAD_BUTTON_DOWN)) {
+            sel ^= 1;
+        }
+        if (down & PAD_BUTTON_A) {
+            printf("\x1b[2J\x1b[1;1H");
+            return sel;
+        }
+    }
+}
+
 static void video_init(void) {
     VIDEO_Init();
     rmode = VIDEO_GetPreferredMode(NULL);
@@ -263,6 +409,12 @@ int main(int argc, char **argv) {
 
     video_init();
     PAD_Init();
+
+    /* The viewer needs no SD card, so offer the menu before touching FAT. */
+    if (main_menu() == 1) {
+        input_viewer();
+        wait_exit();
+    }
 
     printf("\n\nBlueRetro GameCube firmware updater\n");
     printf("===================================\n\n");
