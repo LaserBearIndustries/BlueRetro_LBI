@@ -45,6 +45,19 @@ menu "BlueRetro"
             Mutually exclusive with the quick double press power off, which
             claims the same chained tap timing.
 
+    config BLUERETRO_GC_OTA
+        bool "Accept firmware updates over the GameCube controller port"
+        default n
+        help
+            Adds two vendor SI opcodes, 0x1E and 0x1F, that let GameCube
+            homebrew push a firmware image into the OTA partition without
+            Bluetooth. Useful as a recovery path when the Bluetooth stack
+            itself is what got broken.
+
+            Data arrives eight bytes at a time and is staged in RAM, then
+            flushed a kilobyte at a time; the status opcode reports busy while
+            flash is being written so the console knows to wait. Prototype.
+
     choice
         prompt "Select universal or specific system"
         default BLUERETRO_SYSTEM_UNIVERSAL

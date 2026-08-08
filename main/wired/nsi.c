@@ -21,6 +21,7 @@
 #include "adapter/wired/gc.h"
 #include "system/gpio.h"
 #include "system/intr.h"
+#include "system/gc_ota.h"
 #include "nsi.h"
 
 #define BIT_ZERO 0x80020006
@@ -41,6 +42,14 @@
 #define N64_SLOT_CHANGE 0x03
 
 #define GAME_ID_CMD 0x1D
+
+/* Vendor opcodes for updating adapter firmware from a GameCube homebrew. Picked
+ * to sit next to the game id command and clear of everything the SI protocol
+ * itself defines. GC_OTA_CMD carries data and never answers, like the game id
+ * command; GC_OTA_STATUS_CMD answers, which is what lets the console pace itself
+ * around our flash writes. */
+#define GC_OTA_CMD 0x1E
+#define GC_OTA_STATUS_CMD 0x1F
 
 #define RMT_MEM_ITEM_NUM SOC_RMT_MEM_WORDS_PER_CHANNEL
 
@@ -238,6 +247,27 @@ static void nsi_game_id_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     adapter_q_fb(&fb_data);
 }
 
+#ifdef CONFIG_BLUERETRO_GC_OTA
+static void nsi_ota_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    item = nsi_items_to_bytes(item, buf, 2 + GC_OTA_DATA_LEN);
+    /* Don't answer, go back read */
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 1;
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 0;
+    RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_HW;
+    RMT.conf_ch[channel].conf1.rx_en = 1;
+
+    gc_ota_cmd(buf);
+}
+
+static void nsi_ota_status_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    uint8_t crc;
+
+    gc_ota_status(buf);
+    nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, GC_OTA_STATUS_LEN, &crc, STOP_BIT_2US);
+    RMT.conf_ch[channel].conf1.tx_start = 1;
+}
+#endif /* CONFIG_BLUERETRO_GC_OTA */
+
 static void n64_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     uint8_t crc;
 
@@ -408,6 +438,14 @@ static void gc_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
         case GAME_ID_CMD:
             nsi_game_id_cmd_hdlr(channel, port, item);
             break;
+#ifdef CONFIG_BLUERETRO_GC_OTA
+        case GC_OTA_CMD:
+            nsi_ota_cmd_hdlr(channel, port, item);
+            break;
+        case GC_OTA_STATUS_CMD:
+            nsi_ota_status_hdlr(channel, port, item);
+            break;
+#endif
         case 0x00:
         case 0xFF:
             nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, gc_kb_ident, sizeof(gc_kb_ident), &crc, STOP_BIT_2US);
@@ -437,6 +475,14 @@ static void gc_pad_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
         case GAME_ID_CMD:
             nsi_game_id_cmd_hdlr(channel, port, item);
             break;
+#ifdef CONFIG_BLUERETRO_GC_OTA
+        case GC_OTA_CMD:
+            nsi_ota_cmd_hdlr(channel, port, item);
+            break;
+        case GC_OTA_STATUS_CMD:
+            nsi_ota_status_hdlr(channel, port, item);
+            break;
+#endif
         case 0x00:
         case 0xFF:
             nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, gc_ident, sizeof(gc_ident), &crc, STOP_BIT_2US);

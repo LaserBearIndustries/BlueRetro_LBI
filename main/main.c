@@ -15,6 +15,7 @@
 #include "system/core0_stall.h"
 #include "system/delay.h"
 #include "system/fs.h"
+#include "system/gc_ota.h"
 #include "system/led.h"
 #include "adapter/adapter.h"
 #include "adapter/adapter_debug.h"
@@ -131,6 +132,10 @@ static void wl_init_task(void *arg) {
     if (wired_adapter.system_id < WIRED_MAX) {
         wired_rtos_init();
     }
+
+#ifdef CONFIG_BLUERETRO_GC_OTA
+    gc_ota_init();
+#endif
 
 #ifndef CONFIG_BLUERETRO_QEMU
     mc_init();

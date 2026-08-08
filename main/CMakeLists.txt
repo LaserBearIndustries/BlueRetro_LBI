@@ -96,6 +96,12 @@ if(CONFIG_BLUERETRO_WS_CMDS)
     )
 endif()
 
+if(CONFIG_BLUERETRO_GC_OTA)
+    list(APPEND srcs
+        "system/gc_ota.c"
+    )
+endif()
+
 if(CONFIG_BLUERETRO_COVERAGE)
     list(APPEND srcs
         "tests/coverage.c"
