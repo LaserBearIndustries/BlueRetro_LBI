@@ -57,9 +57,11 @@
 /* Short debounce used between the taps of a chained gesture, so the following
  * tap is not swallowed by the full inhibit above. */
 #define INHIBIT_DEBOUNCE_CNT 10
-/* Taps that arm the held reset, and how long a tap stays chainable. */
+/* Taps that arm the held reset, and how long a tap stays chainable. The window
+ * doubles as the delay before a plain tap resolves into a reset, so keep it just
+ * long enough for a deliberate tap rhythm. */
 #define RST_HOLD_PRESS_CNT 3
-#define RST_HOLD_CHAIN_MS 800
+#define RST_HOLD_CHAIN_MS 500
 
 /* Console power state is mirrored to the filesystem so that a volatile power
  * latch, such as a flip-flop driving a MOSFET switch, can be put back the way it
@@ -380,8 +382,8 @@ static void boot_btn_hdl(void) {
     static uint32_t check_qdp = 0;
 #endif
 #ifdef CONFIG_BLUERETRO_IO0_RST_HOLD
-    static uint32_t press_cnt = 0;
-    static uint32_t press_window = 0;
+    static uint32_t tap_cnt = 0;
+    static uint32_t tap_window = 0;
 #endif
     static uint32_t inhibit_cnt = 0;
     uint32_t hold_cnt = 0;
@@ -389,10 +391,16 @@ static void boot_btn_hdl(void) {
     uint32_t sys_on = 0;
 
 #ifdef CONFIG_BLUERETRO_IO0_RST_HOLD
-    /* Taps only chain while this window is open. Once it lapses the count
-     * towards the held reset gesture starts over. */
-    if (press_window && !--press_window) {
-        press_cnt = 0;
+    /* A tap chain that stopped growing resolves into the plain reset it stood
+     * for. Taps have to be collected rather than acted on as they happen:
+     * sys_mgr_reset() blocks for reset_pin_pulse_ms, and anything pressed during
+     * that block never reaches this handler, so the following taps of a natural
+     * triple tap would be swallowed and the gesture could never arm. */
+    if (tap_window && !--tap_window && tap_cnt) {
+        tap_cnt = 0;
+        sys_mgr_reset();
+        inhibit_cnt = INHIBIT_CNT;
+        return;
     }
 #endif
 
@@ -416,7 +424,7 @@ static void boot_btn_hdl(void) {
         /* Final tap of the chain: keep the console in reset for as long as IO0
          * is held. GameBoy Interface parks the GameBoy Player module while reset
          * stays asserted, which is what makes swapping carts warm possible. */
-        if (press_cnt >= (RST_HOLD_PRESS_CNT - 1) && sys_mgr_get_power()) {
+        if (tap_cnt >= (RST_HOLD_PRESS_CNT - 1) && sys_mgr_get_power()) {
             uint32_t held_cnt = 0;
 
             printf("# %s: Console reset held until IO0 release\n", __FUNCTION__);
@@ -437,8 +445,8 @@ static void boot_btn_hdl(void) {
             set_reset(1);
             set_leds_as_btn_status(0);
 
-            press_cnt = 0;
-            press_window = 0;
+            tap_cnt = 0;
+            tap_window = 0;
             inhibit_cnt = INHIBIT_CNT;
             return;
         }
@@ -467,6 +475,22 @@ static void boot_btn_hdl(void) {
         }
 
         sys_on = sys_mgr_get_power();
+
+#ifdef CONFIG_BLUERETRO_IO0_RST_HOLD
+        /* A short tap on a running console does not act yet: it may be the
+         * opening of the triple tap. Collect it and let the window above decide
+         * whether it was a plain reset or the start of the gesture. Longer holds
+         * are unambiguous, so they act immediately and clear the chain. */
+        if (sys_on && state == SYS_MGR_BTN_STATE0) {
+            set_leds_as_btn_status(0);
+            tap_cnt++;
+            tap_window = RST_HOLD_CHAIN_MS / 10;
+            inhibit_cnt = INHIBIT_DEBOUNCE_CNT;
+            return;
+        }
+        tap_cnt = 0;
+        tap_window = 0;
+#endif
         if (sys_on) {
             /* System is on */
             switch (state) {
@@ -507,19 +531,6 @@ static void boot_btn_hdl(void) {
         }
 
         set_leds_as_btn_status(0);
-
-#ifdef CONFIG_BLUERETRO_IO0_RST_HOLD
-        /* Only a quick tap that actually reset the console counts towards the
-         * held reset. Longer holds clear the chain and keep the full inhibit. */
-        if (sys_on && state == SYS_MGR_BTN_STATE0) {
-            press_cnt++;
-            press_window = RST_HOLD_CHAIN_MS / 10;
-            inhibit_cnt = INHIBIT_DEBOUNCE_CNT;
-            return;
-        }
-        press_cnt = 0;
-        press_window = 0;
-#endif
         inhibit_cnt = INHIBIT_CNT;
     }
 }
