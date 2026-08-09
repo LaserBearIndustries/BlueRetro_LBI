@@ -135,6 +135,7 @@ uint32_t bt_host_get_flag_dev_cnt(uint32_t flag);
 void bt_host_disconnect_all(void);
 const uint8_t *bt_host_dev_bdaddr(struct bt_dev *device);
 void bt_host_le_pair_failed(bt_addr_le_t *addr);
+void bt_host_le_pair_ok(bt_addr_le_t *addr);
 uint32_t bt_host_le_is_pair_failed(bt_addr_le_t *addr);
 void bt_host_le_pair_fail_clear(void);
 int32_t bt_host_get_new_dev(struct bt_dev **device);
