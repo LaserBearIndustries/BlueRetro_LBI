@@ -65,6 +65,7 @@ struct bt_dev {
     uint16_t acl_handle;
     uint32_t hid_state;
     void *timer_hdl;
+    void *conn_timer_hdl;
     uint8_t tid;
     uint8_t hid_retry_cnt;
     const struct bt_name_type *name;

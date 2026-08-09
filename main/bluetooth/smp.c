@@ -291,26 +291,20 @@ void bt_smp_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt, uint3
         {
             struct bt_smp_pairing_fail *pairing_fail = (struct bt_smp_pairing_fail *)bt_hci_acl_pkt->smp_data;
             printf("# BT_SMP_CMD_PAIRING_FAIL reason: %02X\n", pairing_fail->reason);
+            bt_mon_log(true, "dev: %ld pairing fail reason: 0x%02X\n",
+                device->ids.id, pairing_fail->reason);
 
-            /* Hang up, so the device slot goes back. Slots are handed out in
-             * order and wired_port_hdl() turns the slot index straight into a
-             * console port, so a device that pairs and fails while still
-             * holding slot 0 pushes the next real controller to port 2 with
-             * nothing plugged into port 1. Anything advertising nearby, a phone
-             * or a watch, is enough to trigger it.
+            /* Deliberately not a teardown. A pairing failure is not reliably
+             * fatal: the NSO pad answers our pairing request with a Pairing
+             * Failed (Pairing Not Supported) and then sends a perfectly good
+             * Pairing Response under a millisecond later, and the legacy
+             * exchange runs to completion from there. Hanging up here killed
+             * that pad on every single attempt.
              *
-             * Disconnecting rather than clearing the flag by hand keeps this on
-             * the normal teardown path: DISCONN_COMPLETE resets the device and
-             * restarts inquiry and advertising once the last one drops.
+             * A slot held by a device that never becomes a controller is a real
+             * problem, but this is the wrong place to notice it. The connection
+             * watchdog in hci.c judges by the outcome instead.
              */
-            printf("# dev: %ld pairing failed, releasing slot\n", device->ids.id);
-            bt_mon_log(true, "dev: %ld pairing failed, releasing slot\n", device->ids.id);
-
-            /* Disconnecting alone races: it completes asynchronously, and a
-             * real controller advertising inside that window still finds the
-             * slot taken. Remember the address so we stop answering it at all. */
-            bt_host_le_pair_failed(&device->le_remote_bdaddr);
-            bt_hci_disconnect(device);
             break;
         }
         case BT_SMP_CMD_ENCRYPT_INFO:

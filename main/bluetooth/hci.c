@@ -7,6 +7,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/ringbuf.h>
+#include <esp_timer.h>
 #include "host.h"
 #include "l2cap.h"
 #include "mon.h"
@@ -21,6 +22,10 @@
 #include "zephyr/uuid.h"
 
 #define BT_INQUIRY_MAX 10
+
+/* Generous on purpose. Dropping a controller that is merely slow to initialise
+ * is far worse than letting a phone sit on a port a few seconds longer. */
+#define BT_CONN_WATCHDOG_US (10 * 1000 * 1000)
 
 typedef void (*bt_cmd_func_t)(void *param);
 
@@ -1070,6 +1075,7 @@ static void bt_hci_le_meta_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                     printf("dev: %ld acl_handle: 0x%04X\n", device->ids.id, device->acl_handle);
                     bt_mon_log(true, "dev: %ld acl_handle: 0x%04X\n", device->ids.id, device->acl_handle);
                     atomic_set_bit(&device->flags, BT_DEV_IS_BLE);
+                    bt_hci_arm_conn_watchdog(device);
                     if (bt_host_load_le_ltk(&device->le_remote_bdaddr, &encrypt_info, &master_ident) == 0) {
                         bt_hci_start_encryption(device->acl_handle, *(uint64_t *)master_ident.rand, *(uint16_t *)master_ident.ediv, encrypt_info.ltk);
                     }
@@ -1314,6 +1320,59 @@ void bt_hci_disconnect(struct bt_dev *device) {
     }
 }
 
+/* Device slots are handed out in order and wired_port_hdl() turns the slot
+ * index straight into a console port, so anything that connects and then stops
+ * short of becoming a controller pushes the next real pad to port 2 with
+ * nothing plugged into port 1. A phone or a watch advertising nearby is enough.
+ *
+ * Judge that by the outcome rather than by any single step failing.
+ * Intermediate failures are normal and recoverable, so reacting to one means
+ * guessing which are fatal. The only question that matters is whether the
+ * device ever became a working controller, and after a few seconds that answer
+ * is reliable. It also catches devices that stall without failing at all,
+ * which watching for a failure never would.
+ */
+static void bt_hci_conn_watchdog(void *arg) {
+    struct bt_dev *device = (struct bt_dev *)arg;
+
+    if (atomic_test_bit(&device->flags, BT_DEV_HID_INIT_DONE)) {
+        return;
+    }
+
+    printf("# dev: %ld stalled before HID init, releasing slot\n", device->ids.id);
+    bt_mon_log(true, "dev: %ld stalled before HID init, releasing slot\n", device->ids.id);
+
+    /* Disconnecting alone races: it completes asynchronously, and a real
+     * controller advertising inside that window still finds the slot taken.
+     * Remember the address so we stop answering it at all. */
+    bt_host_le_pair_failed(&device->le_remote_bdaddr);
+    bt_hci_disconnect(device);
+}
+
+void bt_hci_arm_conn_watchdog(struct bt_dev *device) {
+    const esp_timer_create_args_t timer_args = {
+        .callback = bt_hci_conn_watchdog,
+        .arg = (void *)device,
+        .name = "bt_conn_wd",
+    };
+
+    if (device->conn_timer_hdl == NULL) {
+        esp_timer_create(&timer_args, (esp_timer_handle_t *)&device->conn_timer_hdl);
+    }
+    if (device->conn_timer_hdl) {
+        esp_timer_start_once(device->conn_timer_hdl, BT_CONN_WATCHDOG_US);
+    }
+}
+
+/* Must run before bt_host_reset_dev(), which memsets the handle away. */
+void bt_hci_disarm_conn_watchdog(struct bt_dev *device) {
+    if (device->conn_timer_hdl) {
+        esp_timer_stop(device->conn_timer_hdl);
+        esp_timer_delete(device->conn_timer_hdl);
+        device->conn_timer_hdl = NULL;
+    }
+}
+
 void bt_hci_sniff_mode(struct bt_dev *device, uint16_t interval) {
     bt_hci_cmd_sniff_mode((void *)&device->acl_handle, interval);
 }
@@ -1494,6 +1553,7 @@ void bt_hci_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                         device->ids.id);
                     bt_host_clear_le_ltk(&device->le_remote_bdaddr);
                 }
+                bt_hci_disarm_conn_watchdog(device);
                 bt_host_reset_dev(device);
                 if (bt_host_get_active_dev(&device) == BT_NONE) {
                     if (config.global_cfg.inquiry_mode == INQ_AUTO) {

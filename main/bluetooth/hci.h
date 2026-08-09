@@ -15,6 +15,8 @@ void bt_hci_stop_inquiry(void);
 uint32_t bt_hci_get_inquiry(void);
 void bt_hci_inquiry_override(uint32_t state);
 void bt_hci_disconnect(struct bt_dev *device);
+void bt_hci_arm_conn_watchdog(struct bt_dev *device);
+void bt_hci_disarm_conn_watchdog(struct bt_dev *device);
 void bt_hci_sniff_mode(struct bt_dev *device, uint16_t interval);
 void bt_hci_exit_sniff_mode(struct bt_dev *device);
 void bt_hci_write_link_supervision_timeout(struct bt_dev *device);
