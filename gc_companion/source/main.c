@@ -108,6 +108,21 @@
 
 #define CFG_PATH "blueretro_config.bin"
 
+/* Pairings. */
+#define GC_PAIR_INFO_CMD 0x2F
+#define GC_PAIR_ENTRY_CMD 0x30
+#define GC_PAIR_CMD 0x31
+#define GC_PAIR_INFO_LEN 8
+#define GC_PAIR_ENTRY_LEN 8
+#define GC_PAIR_PROTO_VER 1
+#define GC_PAIR_MAX 32
+#define GC_PAIR_NO_PORT 0xFF
+#define GC_PAIR_SUB_FORGET 0
+#define GC_PAIR_SUB_FORGET_ALL 1
+#define GC_PAIR_ST_BUSY 1
+#define GC_PAIR_ST_OK 2
+#define GC_PAIR_ST_ERROR 3
+
 /* Refuses anything bigger rather than trusting the adapter's number. The
  * transfer is driven from it, and a corrupt reply should not turn into a
  * loop of a hundred thousand transactions. */
@@ -2050,6 +2065,252 @@ static void settings_menu(void) {
     }
 }
 
+/* ------------------------------------------------------------------ *
+ * Paired devices
+ * ------------------------------------------------------------------ */
+
+struct pair_entry {
+    u8 is_le;
+    u8 port;
+    u8 bdaddr[6];
+};
+
+static int pair_info(int chan, u8 *cnt, u8 *state, u8 *tick) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+
+    req[0] = GC_PAIR_INFO_CMD;
+    memset(in, 0, sizeof(in));
+
+    if (si_xfer(chan, req, 1, in, GC_PAIR_INFO_LEN) < 0) {
+        return -1;
+    }
+    if (in[0] != GC_PAIR_PROTO_VER) {
+        return -2;
+    }
+
+    *cnt = in[1];
+    *state = in[2];
+    *tick = in[3];
+    return 0;
+}
+
+static int pair_entry(int chan, u8 idx, struct pair_entry *out) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+
+    req[0] = GC_PAIR_ENTRY_CMD;
+    req[1] = idx;
+    memset(in, 0, sizeof(in));
+
+    if (si_xfer(chan, req, 2, in, GC_PAIR_ENTRY_LEN) < 0) {
+        return -1;
+    }
+
+    out->is_le = in[0];
+    out->port = in[1];
+    memcpy(out->bdaddr, &in[2], 6);
+    return 0;
+}
+
+static int pair_send(int chan, u8 sub, u8 idx) {
+    static u8 out[32] ATTRIBUTE_ALIGN(32);
+
+    out[0] = GC_PAIR_CMD;
+    out[1] = sub;
+    out[2] = idx;
+
+    return si_xfer(chan, out, 3, NULL, 0);
+}
+
+/* Reads the whole list in one go while the bus is held, rather than a row at
+ * a time as the cursor moves. Thirty two entries is two hundred and fifty six
+ * bytes and the list only changes when something connects or is forgotten. */
+static int pair_read_all(int chan, struct pair_entry *list, u8 *cnt) {
+    u8 state = 0, tick = 0;
+    int i, ret;
+
+    ret = pair_info(chan, cnt, &state, &tick);
+    if (ret < 0) {
+        return ret;
+    }
+    if (*cnt > GC_PAIR_MAX) {
+        *cnt = GC_PAIR_MAX;
+    }
+
+    for (i = 0; i < *cnt; i++) {
+        if (pair_entry(chan, (u8)i, &list[i]) < 0) {
+            *cnt = (u8)i;
+            break;
+        }
+    }
+    return 0;
+}
+
+static int pair_wait(int chan) {
+    u8 cnt = 0, state = GC_PAIR_ST_BUSY, tick = 0;
+    u64 start = gettime();
+
+    while (ticks_to_millisecs(diff_ticks(start, gettime())) < 20000) {
+        if (pair_info(chan, &cnt, &state, &tick) == 0
+                && state != GC_PAIR_ST_BUSY) {
+            return (state == GC_PAIR_ST_ERROR) ? -1 : 0;
+        }
+        usleep(10000);
+    }
+    return -1;
+}
+
+static int pair_confirm(const char *what) {
+    int a = 0, b = 0;
+
+    printf("\x1b[2J\x1b[1;1H");
+    printf("Forget %s?\n", what);
+    printf("=================================\n\n");
+    printf("  It will have to be paired again from scratch, the\n");
+    printf("  same as the first time.\n\n");
+    printf("  Anything connected now is disconnected as part of\n");
+    printf("  this, so controllers will drop.\n\n");
+    printf("  Hold A to forget, B to cancel.\n");
+
+    for (;;) {
+        u16 held = pad_any_held();
+
+        if (held & PAD_BUTTON_A) {
+            if (++a > 45) {
+                return 1;
+            }
+        }
+        else {
+            a = 0;
+        }
+        if (held & (PAD_BUTTON_B | PAD_BUTTON_START)) {
+            if (++b > 15) {
+                return 0;
+            }
+        }
+        else {
+            b = 0;
+        }
+        VIDEO_WaitVSync();
+    }
+}
+
+static void paired_devices(void) {
+    static struct pair_entry list[GC_PAIR_MAX];
+    char label[40];
+    u8 cnt = 0;
+    int chan, sel = 0, i, ret;
+
+    si_grab();
+    chan = ota_find_adapter();
+    ret = (chan < 0) ? -1 : pair_read_all(chan, list, &cnt);
+    pad_settle();
+
+    if (ret == -2) {
+        printf("\nThis app and the adapter disagree about the pairing\n");
+        printf("commands. Flash the firmware that came with this app.\n");
+        wait_ack();
+        return;
+    }
+    if (ret < 0) {
+        printf("\nThe adapter is not answering the pairing commands.\n");
+        printf("If this firmware predates them, rebuild it with\n");
+        printf("CONFIG_BLUERETRO_GC_PAIR.\n");
+        wait_ack();
+        return;
+    }
+
+    for (;;) {
+        u16 down;
+        int rows = cnt + 1;   /* entries, then Forget all */
+
+        printf("\x1b[2J\x1b[1;1H");
+        printf("Paired devices\n==============\n\n");
+
+        if (!cnt) {
+            printf("  Nothing is paired.\n\n");
+        }
+        for (i = 0; i < cnt; i++) {
+            printf("   %s %02X:%02X:%02X:%02X:%02X:%02X  %-3s %s\n",
+                sel == i ? ">" : " ",
+                list[i].bdaddr[5], list[i].bdaddr[4], list[i].bdaddr[3],
+                list[i].bdaddr[2], list[i].bdaddr[1], list[i].bdaddr[0],
+                list[i].is_le ? "LE" : "BR",
+                (list[i].port == GC_PAIR_NO_PORT) ? "" : "connected");
+            if (list[i].port != GC_PAIR_NO_PORT) {
+                printf("       on port %d\n", list[i].port + 1);
+            }
+        }
+        printf("   %s Forget all\n", sel == cnt ? ">" : " ");
+        printf("   %s Back\n", sel == rows ? ">" : " ");
+
+        printf("\n  A pairing that is not a controller still takes a\n");
+        printf("  port, because ports are handed out in the order\n");
+        printf("  things connect. Forgetting it is the fix that lasts.\n");
+        printf("\n  D-pad to choose, A to select, B to go back.\n");
+
+        do {
+            down = pad_any_down();
+            VIDEO_WaitVSync();
+        } while (!down);
+
+        if (down & PAD_BUTTON_UP) {
+            sel = (sel + rows) % (rows + 1);
+        }
+        if (down & PAD_BUTTON_DOWN) {
+            sel = (sel + 1) % (rows + 1);
+        }
+        if (down & PAD_BUTTON_B) {
+            return;
+        }
+        if (!(down & PAD_BUTTON_A)) {
+            continue;
+        }
+        if (sel == rows) {
+            return;
+        }
+
+        if (sel == cnt) {
+            if (!cnt) {
+                continue;
+            }
+            snprintf(label, sizeof(label), "all %u pairings", cnt);
+        }
+        else {
+            snprintf(label, sizeof(label), "%02X:%02X:%02X:%02X:%02X:%02X",
+                list[sel].bdaddr[5], list[sel].bdaddr[4], list[sel].bdaddr[3],
+                list[sel].bdaddr[2], list[sel].bdaddr[1], list[sel].bdaddr[0]);
+        }
+
+        if (!pair_confirm(label)) {
+            continue;
+        }
+
+        si_grab();
+        if (sel == cnt) {
+            pair_send(chan, GC_PAIR_SUB_FORGET_ALL, 0);
+        }
+        else {
+            pair_send(chan, GC_PAIR_SUB_FORGET, (u8)sel);
+        }
+        ret = pair_wait(chan);
+        if (ret == 0) {
+            pair_read_all(chan, list, &cnt);
+        }
+        pad_settle();
+
+        if (ret < 0) {
+            printf("\nThe adapter could not forget that. Nothing changed.\n");
+            wait_ack();
+        }
+
+        if (sel > cnt) {
+            sel = cnt;
+        }
+    }
+}
+
 static int main_menu(void) {
     int sel = 0;
 
@@ -2065,9 +2326,10 @@ static int main_menu(void) {
         printf("   %s Apply a premade profile\n", sel == 1 ? ">" : " ");
         printf("   %s Live input viewer\n", sel == 2 ? ">" : " ");
         printf("   %s Debug log\n", sel == 3 ? ">" : " ");
-        printf("   %s Settings backup\n", sel == 4 ? ">" : " ");
-        printf("   %s Firmware slots\n", sel == 5 ? ">" : " ");
-        printf("   %s Update firmware\n", sel == 6 ? ">" : " ");
+        printf("   %s Paired devices\n", sel == 4 ? ">" : " ");
+        printf("   %s Settings backup\n", sel == 5 ? ">" : " ");
+        printf("   %s Firmware slots\n", sel == 6 ? ">" : " ");
+        printf("   %s Update firmware\n", sel == 7 ? ">" : " ");
         printf("\n  D-pad to choose, A to select, START to exit.\n");
 
         do {
@@ -2079,10 +2341,10 @@ static int main_menu(void) {
             app_exit();
         }
         if (down & PAD_BUTTON_UP) {
-            sel = (sel + 6) % 7;
+            sel = (sel + 7) % 8;
         }
         if (down & PAD_BUTTON_DOWN) {
-            sel = (sel + 1) % 7;
+            sel = (sel + 1) % 8;
         }
         if (down & PAD_BUTTON_A) {
             printf("\x1b[2J\x1b[1;1H");
@@ -2749,10 +3011,14 @@ int main(int argc, char **argv) {
             wait_exit();
         }
         else if (choice == 4) {
-            settings_menu();
+            paired_devices();
             wait_exit();
         }
         else if (choice == 5) {
+            settings_menu();
+            wait_exit();
+        }
+        else if (choice == 6) {
             firmware_slots_menu();
             wait_exit();
         }

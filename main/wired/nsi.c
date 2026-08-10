@@ -21,6 +21,7 @@
 #include "adapter/wired/gc.h"
 #include "system/gc_boot.h"
 #include "system/gc_cfg.h"
+#include "system/gc_pair.h"
 #include "system/gc_log.h"
 #include "system/gpio.h"
 #include "system/intr.h"
@@ -81,6 +82,11 @@
 #define GC_CFG_READ_CMD 0x2C
 #define GC_CFG_WRITE_CMD 0x2D
 #define GC_CFG_CMD 0x2E
+
+/* Pairings: what is remembered, and forgetting it. */
+#define GC_PAIR_INFO_CMD 0x2F
+#define GC_PAIR_ENTRY_CMD 0x30
+#define GC_PAIR_CMD 0x31
 
 #define RMT_MEM_ITEM_NUM SOC_RMT_MEM_WORDS_PER_CHANNEL
 
@@ -377,6 +383,39 @@ static void nsi_log_read_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     gc_log_read(chunk, buf);
     nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, GC_LOG_CHUNK, &crc, STOP_BIT_2US);
     RMT.conf_ch[channel].conf1.tx_start = 1;
+}
+#endif
+
+#ifdef CONFIG_BLUERETRO_GC_PAIR
+static void nsi_pair_info_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    uint8_t crc;
+
+    gc_pair_info(buf);
+    nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, GC_PAIR_INFO_LEN, &crc, STOP_BIT_2US);
+    RMT.conf_ch[channel].conf1.tx_start = 1;
+}
+
+static void nsi_pair_entry_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    uint8_t crc;
+    uint8_t idx;
+
+    nsi_items_to_bytes(item, buf, 1);
+    idx = buf[0];
+
+    gc_pair_entry(idx, buf);
+    nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, GC_PAIR_ENTRY_LEN, &crc, STOP_BIT_2US);
+    RMT.conf_ch[channel].conf1.tx_start = 1;
+}
+
+/* Write only: the result comes back on the info poll. */
+static void nsi_pair_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    item = nsi_items_to_bytes(item, buf, 2);
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 1;
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 0;
+    RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_HW;
+    RMT.conf_ch[channel].conf1.rx_en = 1;
+
+    gc_pair_cmd(buf);
 }
 #endif
 
@@ -704,6 +743,17 @@ static void gc_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
             nsi_cfg_cmd_hdlr(channel, port, item);
             break;
 #endif
+#ifdef CONFIG_BLUERETRO_GC_PAIR
+        case GC_PAIR_INFO_CMD:
+            nsi_pair_info_hdlr(channel, port, item);
+            break;
+        case GC_PAIR_ENTRY_CMD:
+            nsi_pair_entry_hdlr(channel, port, item);
+            break;
+        case GC_PAIR_CMD:
+            nsi_pair_cmd_hdlr(channel, port, item);
+            break;
+#endif
         case 0x00:
         case 0xFF:
             nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, gc_kb_ident, sizeof(gc_kb_ident), &crc, STOP_BIT_2US);
@@ -792,6 +842,17 @@ static void gc_pad_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
             break;
         case GC_CFG_CMD:
             nsi_cfg_cmd_hdlr(channel, port, item);
+            break;
+#endif
+#ifdef CONFIG_BLUERETRO_GC_PAIR
+        case GC_PAIR_INFO_CMD:
+            nsi_pair_info_hdlr(channel, port, item);
+            break;
+        case GC_PAIR_ENTRY_CMD:
+            nsi_pair_entry_hdlr(channel, port, item);
+            break;
+        case GC_PAIR_CMD:
+            nsi_pair_cmd_hdlr(channel, port, item);
             break;
 #endif
         case 0x00:

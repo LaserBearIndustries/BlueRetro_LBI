@@ -29,6 +29,7 @@
 #include "adapter/memory_card.h"
 #include "system/gc_boot.h"
 #include "system/gc_cfg.h"
+#include "system/gc_pair.h"
 #include "system/gc_log.h"
 #include "system/manager.h"
 #include "tests/ws_srv.h"
@@ -137,6 +138,12 @@ static void wl_init_task(void *arg) {
      * left, and there was not enough: the task was never created and every
      * restore sat waiting on it. */
     gc_cfg_init();
+#endif
+
+#ifdef CONFIG_BLUERETRO_GC_PAIR
+    /* Ahead of it for the same reason. Anything added here that needs a task
+     * belongs on this side of the line. */
+    gc_pair_init();
 #endif
 
     mc_init_mem();

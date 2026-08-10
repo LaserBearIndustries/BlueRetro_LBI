@@ -58,6 +58,18 @@ menu "BlueRetro"
             flushed a kilobyte at a time; the status opcode reports busy while
             flash is being written so the console knows to wait. Prototype.
 
+    config BLUERETRO_GC_PAIR
+        bool "See and forget pairings from the GameCube port"
+        default n
+        help
+            Adds vendor SI opcodes 0x2F to 0x31, which list what the
+            adapter has paired with and remove entries from it.
+
+            Device slots turn straight into console ports, so anything
+            that once paired and is not a controller keeps taking port
+            one from something that should have it. Forgetting it is the
+            answer that stays answered. Prototype.
+
     config BLUERETRO_GC_CFG
         bool "Back up and restore settings over the GameCube port"
         default n

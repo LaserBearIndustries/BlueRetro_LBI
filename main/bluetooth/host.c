@@ -775,6 +775,124 @@ int32_t bt_host_store_link_key(struct bt_hci_evt_link_key_notify *link_key_notif
     return ret;
 }
 
+/* Pairings, across both stores, as one list.
+ *
+ * BR/EDR and LE keep their keys in different structures with different shapes,
+ * which is an implementation detail rather than something anyone choosing which
+ * controller to forget should have to care about. An entry is in use when its
+ * address is not all zero, which is already how clearing one marks it gone. */
+static uint32_t bt_host_bdaddr_is_set(const uint8_t *bdaddr) {
+    for (uint32_t i = 0; i < 6; i++) {
+        if (bdaddr[i]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+uint32_t bt_host_pair_cnt(void) {
+    uint32_t cnt = 0;
+
+    for (uint32_t i = 0; i < ARRAY_SIZE(bt_host_link_keys.link_keys); i++) {
+        if (bt_host_bdaddr_is_set(bt_host_link_keys.link_keys[i].bdaddr.val)) {
+            cnt++;
+        }
+    }
+    for (uint32_t i = 0; i < ARRAY_SIZE(bt_host_le_link_keys.keys); i++) {
+        if (bt_host_bdaddr_is_set(bt_host_le_link_keys.keys[i].le_bdaddr.a.val)) {
+            cnt++;
+        }
+    }
+    return cnt;
+}
+
+int32_t bt_host_pair_get(uint32_t idx, uint8_t *is_le, uint8_t *bdaddr) {
+    uint32_t n = 0;
+
+    for (uint32_t i = 0; i < ARRAY_SIZE(bt_host_link_keys.link_keys); i++) {
+        if (bt_host_bdaddr_is_set(bt_host_link_keys.link_keys[i].bdaddr.val)) {
+            if (n++ == idx) {
+                *is_le = 0;
+                memcpy(bdaddr, bt_host_link_keys.link_keys[i].bdaddr.val, 6);
+                return 0;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < ARRAY_SIZE(bt_host_le_link_keys.keys); i++) {
+        if (bt_host_bdaddr_is_set(bt_host_le_link_keys.keys[i].le_bdaddr.a.val)) {
+            if (n++ == idx) {
+                *is_le = 1;
+                memcpy(bdaddr, bt_host_le_link_keys.keys[i].le_bdaddr.a.val, 6);
+                return 0;
+            }
+        }
+    }
+    return -1;
+}
+
+/* Disconnects it too. Removing the key of something still connected leaves it
+ * working until it next drops, which reads as the forget not having happened. */
+int32_t bt_host_pair_forget(uint32_t idx) {
+    uint8_t is_le = 0, bdaddr[6];
+
+    if (bt_host_pair_get(idx, &is_le, bdaddr) < 0) {
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < BT_MAX_DEV; i++) {
+        const uint8_t *dev_bdaddr = bt_host_dev_bdaddr(&bt_dev[i]);
+
+        if (atomic_test_bit(&bt_dev[i].flags, BT_DEV_DEVICE_FOUND)
+                && dev_bdaddr && memcmp(dev_bdaddr, bdaddr, 6) == 0) {
+            bt_hci_disconnect(&bt_dev[i]);
+        }
+    }
+
+    if (is_le) {
+        bt_addr_le_t le_bdaddr = {0};
+
+        memcpy(le_bdaddr.a.val, bdaddr, 6);
+        bt_host_clear_le_ltk(&le_bdaddr);
+    }
+    else {
+        for (uint32_t i = 0; i < ARRAY_SIZE(bt_host_link_keys.link_keys); i++) {
+            if (memcmp(bt_host_link_keys.link_keys[i].bdaddr.val, bdaddr, 6) == 0) {
+                memset(&bt_host_link_keys.link_keys[i], 0,
+                    sizeof(bt_host_link_keys.link_keys[0]));
+            }
+        }
+        bt_host_store_keys_on_file(&bt_host_link_keys);
+    }
+
+    printf("# %s: forgot %02X:%02X:%02X:%02X:%02X:%02X\n", __FUNCTION__,
+        bdaddr[5], bdaddr[4], bdaddr[3], bdaddr[2], bdaddr[1], bdaddr[0]);
+    return 0;
+}
+
+void bt_host_pair_forget_all(void) {
+    bt_host_disconnect_all();
+
+    memset(&bt_host_link_keys, 0, sizeof(bt_host_link_keys));
+    memset(&bt_host_le_link_keys, 0, sizeof(bt_host_le_link_keys));
+    bt_host_store_keys_on_file(&bt_host_link_keys);
+    bt_host_store_le_keys_on_file(&bt_host_le_link_keys);
+
+    printf("# %s: all pairings cleared\n", __FUNCTION__);
+}
+
+/* Which port a paired address is driving right now, or -1. */
+int32_t bt_host_pair_port(const uint8_t *bdaddr) {
+    for (uint32_t i = 0; i < BT_MAX_DEV; i++) {
+        const uint8_t *dev_bdaddr = bt_host_dev_bdaddr(&bt_dev[i]);
+
+        if (atomic_test_bit(&bt_dev[i].flags, BT_DEV_DEVICE_FOUND)
+                && dev_bdaddr && memcmp(dev_bdaddr, bdaddr, 6) == 0) {
+            return bt_dev[i].ids.out_idx;
+        }
+    }
+    return -1;
+}
+
 void bt_host_clear_le_ltk(bt_addr_le_t *le_bdaddr) {
     for (uint32_t i = 0; i < ARRAY_SIZE(bt_host_le_link_keys.keys); i++) {
         if (memcmp((void *)le_bdaddr, (void *)&bt_host_le_link_keys.keys[i].le_bdaddr, sizeof(*le_bdaddr)) == 0) {

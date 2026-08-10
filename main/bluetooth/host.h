@@ -155,6 +155,14 @@ int32_t bt_host_init(void);
 int32_t bt_host_txq_add(uint8_t *packet, uint32_t packet_len);
 int32_t bt_host_load_link_key(struct bt_hci_cp_link_key_reply *link_key_reply);
 int32_t bt_host_store_link_key(struct bt_hci_evt_link_key_notify *link_key_notify);
+/* Pairings across both stores as one list, so nothing above has to know that
+ * BR/EDR and LE keep their keys apart. */
+uint32_t bt_host_pair_cnt(void);
+int32_t bt_host_pair_get(uint32_t idx, uint8_t *is_le, uint8_t *bdaddr);
+int32_t bt_host_pair_forget(uint32_t idx);
+void bt_host_pair_forget_all(void);
+int32_t bt_host_pair_port(const uint8_t *bdaddr);
+
 void bt_host_clear_le_ltk(bt_addr_le_t *le_bdaddr);
 int32_t bt_host_load_le_ltk(bt_addr_le_t *le_bdaddr, struct bt_smp_encrypt_info *encrypt_info, struct bt_smp_master_ident *master_ident);
 int32_t bt_host_store_le_ltk(bt_addr_le_t *le_bdaddr, struct bt_smp_encrypt_info *encrypt_info);
