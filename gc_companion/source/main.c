@@ -1641,6 +1641,10 @@ static void read_adapter_version(void) {
  * Settings backup and restore
  * ------------------------------------------------------------------ */
 
+/* What the adapter last claimed to speak, so a mismatch can be named rather
+ * than surfacing as whichever generic failure happens to come first. */
+static u8 cfg_peer_proto = 0;
+
 static int cfg_info(int chan, u8 *state, u32 *size, u8 *why, u16 *detail) {
     static u8 req[32] ATTRIBUTE_ALIGN(32);
     static u8 in[32] ATTRIBUTE_ALIGN(32);
@@ -1651,9 +1655,16 @@ static int cfg_info(int chan, u8 *state, u32 *size, u8 *why, u16 *detail) {
     if (si_xfer(chan, req, 1, in, GC_CFG_INFO_LEN) < 0) {
         return -1;
     }
+
+    /* Distinct from no answer at all, because the two want opposite responses
+     * and telling them apart was worth a round on its own. An adapter speaking
+     * a different version of this is running firmware that does not match the
+     * app, and every field below would be read out of the wrong byte. */
     if (in[0] != GC_CFG_PROTO_VER) {
-        return -1;
+        cfg_peer_proto = in[0];
+        return -2;
     }
+    cfg_peer_proto = in[0];
 
     *state = in[1];
     *size = (u32)in[2] | ((u32)in[3] << 8);
@@ -1907,16 +1918,33 @@ static void cfg_restore(int chan, u32 size) {
 static void settings_menu(void) {
     u8 state = 0;
     u32 size = 0;
-    int chan, sel = 0;
+    int chan, sel = 0, ret = -1;
 
     si_grab();
     chan = ota_find_adapter();
-    if (chan >= 0 && cfg_info(chan, &state, &size, NULL, NULL) < 0) {
-        chan = -1;
+    if (chan >= 0) {
+        ret = cfg_info(chan, &state, &size, NULL, NULL);
     }
     pad_settle();
 
-    if (chan < 0) {
+    /* Caught here, at the door, rather than letting a mismatch through to fail
+     * later as something that looks unrelated. Every field of the reply moves
+     * when this changes, so nothing read past this point would mean anything. */
+    if (ret == -2) {
+        printf("\x1b[2J\x1b[1;1H");
+        printf("Settings backup\n===============\n\n");
+        printf("  This app and the adapter disagree about how to talk\n");
+        printf("  about settings: the app speaks version %u, the adapter\n",
+            GC_CFG_PROTO_VER);
+        printf("  speaks version %u.\n\n", cfg_peer_proto);
+        printf("  app      %s\n", APP_VERSION);
+        printf("  adapter  %s\n\n", adapter_ver[0] ? adapter_ver : "unknown");
+        printf("  Flash the firmware that came with this app.\n");
+        wait_ack();
+        return;
+    }
+
+    if (chan < 0 || ret < 0) {
         printf("\nThe adapter is not answering the settings commands.\n");
         printf("If this firmware predates them, rebuild it with\n");
         printf("CONFIG_BLUERETRO_GC_CFG.\n");
