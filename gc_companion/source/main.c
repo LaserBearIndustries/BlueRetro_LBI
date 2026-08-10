@@ -1797,6 +1797,13 @@ static void cfg_restore(int chan, u32 size) {
         }
         if (ticks_to_millisecs(diff_ticks(start, gettime())) > 5000) {
             printf("\nThe adapter never became ready. Nothing applied.\n");
+            /* Far and away the likeliest reason, since the ready state and the
+             * wait for it arrived in the same commit: an adapter running older
+             * firmware than this app will never report it. */
+            printf("\n  app      %s\n", APP_VERSION);
+            printf("  adapter  %s\n", adapter_ver[0] ? adapter_ver : "unknown");
+            printf("\nIf those differ, flash the firmware that came with this\n");
+            printf("app and try again.\n");
             cfg_cmd(chan, GC_CFG_SUB_ABORT);
             fclose(f);
             return;
