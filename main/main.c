@@ -21,6 +21,7 @@
 #include "adapter/adapter.h"
 #include "adapter/adapter_debug.h"
 #include "adapter/config.h"
+#include "adapter/gameid.h"
 #include "bluetooth/host.h"
 #include "wired/detect.h"
 #include "wired/wired_bare.h"
@@ -115,6 +116,12 @@ static void wl_init_task(void *arg) {
     ESP_ERROR_CHECK(ret);
 
     config_init(DEFAULT_CFG);
+
+#ifndef CONFIG_BLUERETRO_QEMU
+    /* Needs the filesystem, and has to be in place before the first game id
+     * arrives, which for a disc already in the drive is very early. */
+    gid_hist_init();
+#endif
 
 #ifndef CONFIG_BLUERETRO_QEMU
     /* Get the console powered back up before the slow parts of boot. Everything

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "gameid.h"
+#include "system/fs.h"
 #include "tools/ps1_gameid.h"
 
 #define GAME_ID_BUF_LEN 23
@@ -69,6 +70,57 @@ static char gid_hist[GID_HIST_MAX][GAME_ID_BUF_LEN] = {{0}};
 static uint32_t gid_hist_used = 0;
 static uint32_t gid_app_marked = 1;
 
+#define GID_HIST_MAGIC 0x54534948 /* HIST */
+#define GID_HIST_VER 1
+
+struct gid_hist_file {
+    uint32_t magic;
+    uint8_t version;
+    uint8_t used;
+    uint8_t reserved[2];
+    char entry[GID_HIST_MAX][GAME_ID_BUF_LEN];
+} __attribute__((packed));
+
+/* Written on every change, which is once per game launch. Rare enough that the
+ * flash wear is not worth thinking about, and losing the list is precisely the
+ * failure this exists to prevent. */
+static void gid_hist_save(void) {
+    struct gid_hist_file data = {
+        .magic = GID_HIST_MAGIC,
+        .version = GID_HIST_VER,
+        .used = (uint8_t)gid_hist_used,
+    };
+    FILE *file;
+
+    memcpy(data.entry, gid_hist, sizeof(data.entry));
+
+    file = fopen(GID_HIST_FILE, "wb");
+    if (file == NULL) {
+        printf("# %s: failed to open %s for writing\n", __FUNCTION__, GID_HIST_FILE);
+        return;
+    }
+    fwrite(&data, sizeof(data), 1, file);
+    fclose(file);
+}
+
+void gid_hist_init(void) {
+    struct gid_hist_file data = {0};
+    FILE *file = fopen(GID_HIST_FILE, "rb");
+
+    if (file == NULL) {
+        return;
+    }
+
+    if (fread(&data, sizeof(data), 1, file) == 1
+            && data.magic == GID_HIST_MAGIC && data.version == GID_HIST_VER
+            && data.used <= GID_HIST_MAX) {
+        memcpy(gid_hist, data.entry, sizeof(gid_hist));
+        gid_hist_used = data.used;
+        printf("# %s: %lu recent games\n", __FUNCTION__, gid_hist_used);
+    }
+    fclose(file);
+}
+
 /* Newest first, no duplicates. Relaunching the same thing repeatedly is normal,
  * and without the dedupe it would push everything worth remembering off the
  * end, which is exactly the entry anyone is here to find. */
@@ -114,6 +166,7 @@ void gid_hist_push(const char *gameid_in) {
     strncpy(gid_hist[0], gameid_in, GAME_ID_BUF_LEN - 1);
 
     printf("# %s: %s\n", __FUNCTION__, gid_hist[0]);
+    gid_hist_save();
 }
 
 /* Running the companion app is a launch like any other, so its own id lands at
@@ -142,6 +195,10 @@ void gid_hist_mark_app(void) {
     }
     gid_hist_used--;
     memset(gid_hist[gid_hist_used], 0, GAME_ID_BUF_LEN);
+
+    /* Persisted as well, or the app would be sitting at the top of the list as
+     * the most recently launched thing after the next power cycle. */
+    gid_hist_save();
 }
 
 const char *gid_hist_get(uint32_t idx) {

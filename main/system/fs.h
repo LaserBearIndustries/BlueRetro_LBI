@@ -22,6 +22,12 @@
  * bdaddr has already claimed half of. */
 #define CTRL_MAP_GAME_FILE_PFX "/fs/g"
 
+/* Recently launched games. Kept on the filesystem because the adapter is
+ * powered by the console, and power cycling to get back to the loader is the
+ * normal way to do it, which would otherwise wipe the list every time, right
+ * before it was wanted. */
+#define GID_HIST_FILE "/fs/gidhist"
+
 int32_t fs_init(void);
 void fs_reset(void);
 

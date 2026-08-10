@@ -20,6 +20,7 @@
 int32_t gid_update(struct raw_fb *fb_data);
 int32_t gid_update_sys(struct raw_fb *fb_data);
 char *gid_get(void);
+void gid_hist_init(void);
 void gid_hist_push(const char *gameid);
 void gid_hist_mark_app(void);
 const char *gid_hist_get(uint32_t idx);
