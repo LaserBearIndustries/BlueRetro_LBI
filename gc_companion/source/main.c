@@ -90,7 +90,12 @@
 #define GC_CFG_CMD 0x2E
 #define GC_CFG_CHUNK 8
 #define GC_CFG_INFO_LEN 8
-#define GC_CFG_PROTO_VER 1
+#define GC_CFG_PROTO_VER 2
+
+#define GC_CFG_WHY_NONE 0
+#define GC_CFG_WHY_MISSING_CHUNK 1
+#define GC_CFG_WHY_BAD_MAGIC 2
+#define GC_CFG_WHY_BAD_MAP_SIZE 3
 #define GC_CFG_SUB_BEGIN 0
 #define GC_CFG_SUB_APPLY 1
 #define GC_CFG_SUB_ABORT 2
@@ -1636,7 +1641,7 @@ static void read_adapter_version(void) {
  * Settings backup and restore
  * ------------------------------------------------------------------ */
 
-static int cfg_info(int chan, u8 *state, u32 *size, u16 *missing) {
+static int cfg_info(int chan, u8 *state, u32 *size, u8 *why, u16 *detail) {
     static u8 req[32] ATTRIBUTE_ALIGN(32);
     static u8 in[32] ATTRIBUTE_ALIGN(32);
 
@@ -1651,9 +1656,12 @@ static int cfg_info(int chan, u8 *state, u32 *size, u16 *missing) {
     }
 
     *state = in[1];
-    *size = (u32)in[2] | ((u32)in[3] << 8) | ((u32)in[4] << 16) | ((u32)in[5] << 24);
-    if (missing) {
-        *missing = (u16)in[6] | ((u16)in[7] << 8);
+    *size = (u32)in[2] | ((u32)in[3] << 8);
+    if (why) {
+        *why = in[4];
+    }
+    if (detail) {
+        *detail = (u16)in[6] | ((u16)in[7] << 8);
     }
     return (*size && *size <= CFG_SIZE_MAX) ? 0 : -1;
 }
@@ -1750,7 +1758,8 @@ static void cfg_restore(int chan, u32 size) {
     u32 done = 0;
     u8 state = 0;
     u32 reported = 0;
-    u16 missing = 0xFFFF;
+    u8 why = GC_CFG_WHY_NONE;
+    u16 detail = 0;
     u64 start;
     int last_pct = -1;
 
@@ -1791,12 +1800,12 @@ static void cfg_restore(int chan, u32 size) {
      * staging buffer is ready. */
     start = gettime();
     for (;;) {
-        if (cfg_info(chan, &state, &reported, NULL) == 0
+        if (cfg_info(chan, &state, &reported, NULL, NULL) == 0
                 && state == GC_CFG_ST_READY) {
             break;
         }
         if (ticks_to_millisecs(diff_ticks(start, gettime())) > 5000) {
-            int ok = (cfg_info(chan, &state, &reported, NULL) == 0);
+            int ok = (cfg_info(chan, &state, &reported, NULL, NULL) == 0);
 
             printf("\nThe adapter never became ready. Nothing applied.\n");
 
@@ -1862,7 +1871,7 @@ static void cfg_restore(int chan, u32 size) {
 
     start = gettime();
     while (ticks_to_millisecs(diff_ticks(start, gettime())) < 10000) {
-        if (cfg_info(chan, &state, &reported, &missing) == 0
+        if (cfg_info(chan, &state, &reported, &why, &detail) == 0
                 && (state == GC_CFG_ST_OK || state == GC_CFG_ST_ERROR)) {
             break;
         }
@@ -1872,13 +1881,26 @@ static void cfg_restore(int chan, u32 size) {
     if (state == GC_CFG_ST_OK) {
         printf("\nSettings restored. They are live now.\n");
     }
-    else if (missing != 0xFFFF) {
-        printf("\nChunk %u of %lu never arrived. Nothing changed.\n",
-            missing, (unsigned long)(size / GC_CFG_CHUNK));
-        printf("Worth simply trying again.\n");
-    }
     else {
-        printf("\nThe adapter rejected it. Nothing changed.\n");
+        printf("\nThe adapter rejected it. Nothing changed.\n\n");
+        switch (why) {
+            case GC_CFG_WHY_MISSING_CHUNK:
+                printf("  Chunk %u of %lu never arrived.\n",
+                    detail, (unsigned long)(size / GC_CFG_CHUNK));
+                printf("  Worth simply trying again.\n");
+                break;
+            case GC_CFG_WHY_BAD_MAGIC:
+                printf("  Every chunk arrived, but what it holds does not\n");
+                printf("  start like a config: low half of the magic was\n");
+                printf("  %04X, and should be C69A.\n", detail);
+                break;
+            case GC_CFG_WHY_BAD_MAP_SIZE:
+                printf("  Port %u claims more mappings than fit.\n", detail);
+                break;
+            default:
+                printf("  Reason %u.\n", why);
+                break;
+        }
     }
 }
 
@@ -1889,7 +1911,7 @@ static void settings_menu(void) {
 
     si_grab();
     chan = ota_find_adapter();
-    if (chan >= 0 && cfg_info(chan, &state, &size, NULL) < 0) {
+    if (chan >= 0 && cfg_info(chan, &state, &size, NULL, NULL) < 0) {
         chan = -1;
     }
     pad_settle();

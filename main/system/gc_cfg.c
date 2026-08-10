@@ -33,7 +33,8 @@ static uint8_t received[GC_CFG_BITMAP_LEN];
 
 static volatile uint8_t cfg_state = GC_CFG_ST_IDLE;
 static volatile uint8_t cfg_req = GC_CFG_REQ_NONE;
-static volatile uint16_t cfg_missing = 0xFFFF;
+static volatile uint8_t cfg_why = GC_CFG_WHY_NONE;
+static volatile uint16_t cfg_detail = 0;
 
 void IRAM_ATTR gc_cfg_info(uint8_t *out) {
     uint32_t size = sizeof(struct config);
@@ -42,10 +43,10 @@ void IRAM_ATTR gc_cfg_info(uint8_t *out) {
     out[1] = cfg_state;
     out[2] = (uint8_t)size;
     out[3] = (uint8_t)(size >> 8);
-    out[4] = (uint8_t)(size >> 16);
-    out[5] = (uint8_t)(size >> 24);
-    out[6] = (uint8_t)cfg_missing;
-    out[7] = (uint8_t)(cfg_missing >> 8);
+    out[4] = cfg_why;
+    out[5] = 0;
+    out[6] = (uint8_t)cfg_detail;
+    out[7] = (uint8_t)(cfg_detail >> 8);
 }
 
 void IRAM_ATTR gc_cfg_read(uint16_t chunk, uint8_t *out) {
@@ -89,7 +90,8 @@ void IRAM_ATTR gc_cfg_cmd(const uint8_t *payload) {
              * means a restore no longer depends on a task running between the
              * start command and the first chunk. */
             memset(received, 0, sizeof(received));
-            cfg_missing = 0xFFFF;
+            cfg_why = GC_CFG_WHY_NONE;
+            cfg_detail = 0;
             cfg_state = GC_CFG_ST_READY;
             break;
         case GC_CFG_SUB_APPLY:
@@ -121,9 +123,12 @@ static uint32_t gc_cfg_staged_is_sane(void) {
     const struct config *in = (const struct config *)stage;
     uint32_t i;
 
-    cfg_missing = gc_cfg_first_missing();
-    if (cfg_missing != 0xFFFF) {
-        printf("# %s: chunk %u never arrived\n", __FUNCTION__, cfg_missing);
+    uint16_t missing = gc_cfg_first_missing();
+
+    if (missing != 0xFFFF) {
+        cfg_why = GC_CFG_WHY_MISSING_CHUNK;
+        cfg_detail = missing;
+        printf("# %s: chunk %u never arrived\n", __FUNCTION__, missing);
         return 0;
     }
 
@@ -131,6 +136,10 @@ static uint32_t gc_cfg_staged_is_sane(void) {
      * on a file it can rewrite in place, and an adapter is a poor place to
      * discover that an old backup needed converting. */
     if (in->magic != CONFIG_MAGIC) {
+        cfg_why = GC_CFG_WHY_BAD_MAGIC;
+        /* The low half distinguishes a buffer that stayed empty from one that
+         * received something other than what was sent. */
+        cfg_detail = (uint16_t)in->magic;
         printf("# %s: magic %08lX, expected %08X\n", __FUNCTION__,
             (unsigned long)in->magic, CONFIG_MAGIC);
         return 0;
@@ -138,6 +147,8 @@ static uint32_t gc_cfg_staged_is_sane(void) {
 
     for (i = 0; i < WIRED_MAX_DEV; i++) {
         if (in->in_cfg[i].map_size > ADAPTER_MAPPING_MAX) {
+            cfg_why = GC_CFG_WHY_BAD_MAP_SIZE;
+            cfg_detail = (uint16_t)i;
             printf("# %s: port %lu map_size %u\n", __FUNCTION__,
                 i, in->in_cfg[i].map_size);
             return 0;

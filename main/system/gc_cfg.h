@@ -25,11 +25,23 @@
 /* Bytes returned by the info command:
  * [0] protocol version
  * [1] state, see below
- * [2..5] config size, little endian
- * [6..7] first chunk of a restore that never arrived, 0xFFFF if none did */
+ * [2..3] config size, little endian
+ * [4] why the last restore was refused, see below
+ * [5] reserved
+ * [6..7] detail for that reason, little endian */
 #define GC_CFG_INFO_LEN 8
 
-#define GC_CFG_PROTO_VER 1
+#define GC_CFG_PROTO_VER 2
+
+/* Which check refused a restore, and what it saw. Reporting only that
+ * something was wrong meant the reason lived in a log nobody had, and cost two
+ * rounds of guessing from the outside. */
+enum {
+    GC_CFG_WHY_NONE = 0,
+    GC_CFG_WHY_MISSING_CHUNK,   /* detail: the chunk that never arrived */
+    GC_CFG_WHY_BAD_MAGIC,       /* detail: low half of the magic that was staged */
+    GC_CFG_WHY_BAD_MAP_SIZE,    /* detail: the port whose map_size was too big */
+};
 
 /* Sub command, carried in the first payload byte. */
 enum {
