@@ -146,6 +146,7 @@ static u16 pad_any_down(void);
 static u16 pad_any_held(void);
 static void pad_settle(void);
 static int prompt_again(void);
+static void app_exit(void);
 
 static void si_cb(s32 chan, u32 type) {
     (void)chan;
@@ -1095,7 +1096,7 @@ static int main_menu(void) {
         } while (!down);
 
         if (down & PAD_BUTTON_START) {
-            exit(0);
+            app_exit();
         }
         if (down & PAD_BUTTON_UP) {
             sel = (sel + 3) % 4;
@@ -1196,11 +1197,222 @@ static int prompt_again(void) {
     }
 }
 
+/* ------------------------------------------------------------------ *
+ * Returning to the loader
+ *
+ * exit() drops back to whatever launched us, which works from Swiss but
+ * leaves PicoLoader and friends with nowhere to go: PicoLoader in
+ * particular needs the console power cycled to get out of. So look for a
+ * loader DOL on the card and chainload it, and only fall back to exit()
+ * when there is nothing to chainload.
+ * ------------------------------------------------------------------ */
+
+/* Both well clear of where any DOL loads. Our own image ends just past
+ * 0x80081a80 and a target links from 0x80003100, so anything staged in the
+ * heap would sit right in the path of the copy. */
+#define DOL_STAGE_ADDR 0x80C00000
+#define DOL_TRAMP_ADDR 0x81200000
+#define DOL_MAX_SIZE (6 * 1024 * 1024)
+#define DOL_TRAMP_CODE 256
+
+#define DOL_TEXT_CNT 7
+#define DOL_DATA_CNT 11
+
+typedef struct {
+    u32 text_off[DOL_TEXT_CNT];
+    u32 data_off[DOL_DATA_CNT];
+    u32 text_addr[DOL_TEXT_CNT];
+    u32 data_addr[DOL_DATA_CNT];
+    u32 text_size[DOL_TEXT_CNT];
+    u32 data_size[DOL_DATA_CNT];
+    u32 bss_addr;
+    u32 bss_size;
+    u32 entry;
+    u32 pad[7];
+} dol_header;
+
+/* Candidates in order of how likely they are to be a loader that wants us
+ * back. igr.dol is Swiss's own return stub, so it wins when present. */
+static const char *dol_names[] = {
+    "/igr.dol",
+    "/swiss/igr.dol",
+    "/swiss/boot.dol",
+    "/apps/swiss/boot.dol",
+    "/boot.dol",
+};
+
+/* Runs from a relocated copy, because by the time the section copy is under
+ * way the original of this code has been overwritten by the incoming DOL.
+ * That makes it position independent by necessity: no globals, no calls, no
+ * return. r3 arrives pointing at the entry address followed by {dst, src,
+ * bytes} triples, terminated by a zero dst.
+ *
+ * Cache maintenance is per word rather than per line. Redundant, since a
+ * line covers eight of them, but a few hundred thousand extra dcbf on a
+ * multi megabyte image still costs only milliseconds and it removes any
+ * question of a partial line being left stale. */
+static void dol_trampoline(void) {
+    __asm__ volatile (
+        "lwz     31, 0(3)\n"
+        "addi    3, 3, 4\n"
+        "1:\n"
+        "lwz     4, 0(3)\n"
+        "lwz     5, 4(3)\n"
+        "lwz     6, 8(3)\n"
+        "addi    3, 3, 12\n"
+        "cmpwi   4, 0\n"
+        "beq     3f\n"
+        "cmpwi   6, 0\n"
+        "beq     1b\n"
+        "2:\n"
+        "lwz     7, 0(5)\n"
+        "stw     7, 0(4)\n"
+        "dcbf    0, 4\n"
+        "icbi    0, 4\n"
+        "addi    4, 4, 4\n"
+        "addi    5, 5, 4\n"
+        "addic.  6, 6, -4\n"
+        "bgt     2b\n"
+        "b       1b\n"
+        "3:\n"
+        "sync\n"
+        "isync\n"
+        "li      3, 0\n"
+        "mtlr    31\n"
+        "blr\n"
+    );
+}
+
+/* Opens the first candidate that exists, trying the device we were loaded
+ * from first. Swiss fills argv[0] in with our own path, which is the only
+ * reliable way to tell an SD Gecko in slot A from one in slot B. */
+static FILE *dol_open(char *shown, int shown_len) {
+    char path[128];
+    char dev[32];
+    unsigned i, d;
+
+    dev[0] = 0;
+    if (__system_argv && __system_argv->argvMagic == ARGV_MAGIC
+            && __system_argv->argc > 0 && __system_argv->argv[0]) {
+        const char *a = __system_argv->argv[0];
+        const char *c = strchr(a, ':');
+
+        if (c && (size_t)(c - a) < sizeof(dev) - 2) {
+            memcpy(dev, a, c - a + 1);
+            dev[c - a + 1] = 0;
+        }
+    }
+
+    for (d = 0; d < 3; d++) {
+        const char *prefix = (d == 0) ? dev : ((d == 1) ? "" : "sd:");
+
+        if (d == 0 && !dev[0]) {
+            continue;
+        }
+
+        for (i = 0; i < sizeof(dol_names) / sizeof(dol_names[0]); i++) {
+            FILE *f;
+
+            snprintf(path, sizeof(path), "%s%s", prefix, dol_names[i]);
+            f = fopen(path, "rb");
+            if (f) {
+                snprintf(shown, shown_len, "%s", path);
+                return f;
+            }
+        }
+    }
+    return NULL;
+}
+
+/* Returns only on failure. */
+static void dol_chainload(void) {
+    char shown[128];
+    dol_header *h = (dol_header *)DOL_STAGE_ADDR;
+    u32 *desc = (u32 *)(DOL_TRAMP_ADDR + DOL_TRAMP_CODE);
+    u32 *d = desc;
+    void (*tramp)(u32 *) = (void (*)(u32 *))DOL_TRAMP_ADDR;
+    FILE *f;
+    long size;
+    int i;
+
+    if (!fatInitDefault()) {
+        return;
+    }
+
+    f = dol_open(shown, sizeof(shown));
+    if (!f) {
+        return;
+    }
+
+    fseek(f, 0, SEEK_END);
+    size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (size < (long)sizeof(dol_header) || size > DOL_MAX_SIZE) {
+        fclose(f);
+        return;
+    }
+    if (fread((void *)DOL_STAGE_ADDR, 1, size, f) != (size_t)size) {
+        fclose(f);
+        return;
+    }
+    fclose(f);
+
+    printf("\nReturning via %s\n", shown);
+    VIDEO_WaitVSync();
+
+    *d++ = h->entry;
+    for (i = 0; i < DOL_TEXT_CNT; i++) {
+        if (h->text_size[i] && h->text_addr[i]) {
+            *d++ = h->text_addr[i];
+            *d++ = DOL_STAGE_ADDR + h->text_off[i];
+            *d++ = (h->text_size[i] + 3) & ~3u;
+        }
+    }
+    for (i = 0; i < DOL_DATA_CNT; i++) {
+        if (h->data_size[i] && h->data_addr[i]) {
+            *d++ = h->data_addr[i];
+            *d++ = DOL_STAGE_ADDR + h->data_off[i];
+            *d++ = (h->data_size[i] + 3) & ~3u;
+        }
+    }
+    *d++ = 0;
+    *d++ = 0;
+    *d++ = 0;
+
+    /* bss is left alone deliberately. Zeroing it here would mean writing
+     * over ourselves before the copy loop is even in place, and every DOL
+     * devkitPPC builds clears its own in crt0. */
+
+    memcpy((void *)DOL_TRAMP_ADDR, (const void *)dol_trampoline, DOL_TRAMP_CODE);
+
+    /* Hand the pads back before the bus goes away with us. */
+    SI_EnablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    VIDEO_SetBlack(TRUE);
+    VIDEO_Flush();
+    VIDEO_WaitVSync();
+
+    SYS_ResetSystem(SYS_SHUTDOWN, 0, FALSE);
+
+    DCFlushRange((void *)DOL_STAGE_ADDR, size);
+    DCFlushRange((void *)DOL_TRAMP_ADDR, DOL_TRAMP_CODE + (u32)((d - desc) * 4));
+    ICInvalidateRange((void *)DOL_TRAMP_ADDR, DOL_TRAMP_CODE);
+
+    IRQ_Disable();
+    tramp(desc);
+}
+
+static void app_exit(void) {
+    dol_chainload();
+    /* Nothing to chainload, or it would not load. Out the usual way. */
+    exit(0);
+}
+
 static void wait_exit(void) {
     printf("\nPress START to exit.\n");
     for (;;) {
         if (pad_any_down() & PAD_BUTTON_START) {
-            exit(0);
+            app_exit();
         }
         VIDEO_WaitVSync();
     }
