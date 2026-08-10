@@ -196,6 +196,12 @@ static int si_xfer(int chan, void *out, u32 out_len, void *in, u32 in_len) {
     u64 start = gettime();
 
     si_done = 0;
+
+    /* One deadline covering both waiting for the channel and waiting for the
+     * reply, not one each. Callers poll in loops of a few hundred, so the cost
+     * of a failed transfer is multiplied by that; letting it reach twice the
+     * timeout turned a poll that should give up in half a minute into one that
+     * took several. */
     while (!SI_Transfer(chan, out, out_len, in, in_len, si_cb, 0)) {
         if (ticks_to_millisecs(diff_ticks(start, gettime())) > SI_TIMEOUT_MS) {
             return -1;
@@ -203,7 +209,7 @@ static int si_xfer(int chan, void *out, u32 out_len, void *in, u32 in_len) {
     }
 
     while (!si_done) {
-        if (ticks_to_millisecs(diff_ticks(start, gettime())) > SI_TIMEOUT_MS * 2) {
+        if (ticks_to_millisecs(diff_ticks(start, gettime())) > SI_TIMEOUT_MS) {
             return -1;
         }
     }
@@ -218,7 +224,12 @@ static void si_grab(void) {
     int i;
 
     SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
-    for (i = 0; i < 300 && !PAD_Sync(); i++) {
+
+    /* A second is far longer than a probe needs, and this is paid on every
+     * operation, so a longer wait here is silently charged to everything. If
+     * libogc still has not finished, carry on regardless: si_xfer() waits out a
+     * refused channel by itself, which is the real protection. */
+    for (i = 0; i < 60 && !PAD_Sync(); i++) {
         VIDEO_WaitVSync();
     }
 }
@@ -825,8 +836,9 @@ static int mapping_wizard(void) {
     u8 dev, st, args[8];
     u32 btns;
     s8 ax[GC_APP_AXIS_CNT];
-    int chan, i, s, n = 0, port = 0, tries;
+    int chan, i, s, n = 0, port = 0;
     int trig_mode, total, shown = 0;
+    u64 commit_start;
 
     /* Asked while libogc can still read the GameCube pad, before the manual
      * transfers take the bus. */
@@ -999,8 +1011,12 @@ static int mapping_wizard(void) {
         app_map_send(chan, GC_APP_MAP_COMMIT, args, 2);
     }
 
+    /* Bounded by the clock rather than by a count of attempts. An attempt costs
+     * whatever a failed transfer costs, which is not fixed and is not something
+     * this loop should be quietly paying a multiple of. */
     st = GC_APP_ST_BUSY;
-    for (tries = 0; tries < 300; tries++) {
+    commit_start = gettime();
+    while (ticks_to_millisecs(diff_ticks(commit_start, gettime())) < 10000) {
         if (app_read_status(chan, &st) == 0
                 && (st == GC_APP_ST_OK || st == GC_APP_ST_ERROR)) {
             break;
@@ -2154,9 +2170,12 @@ int main(int argc, char **argv) {
      * here is expected rather than a failure. */
     {
         u8 state = 0, s = 0, ver = 0;
-        int tries;
+        u64 wait_start = gettime();
 
-        for (tries = 0; tries < 200; tries++) {
+        /* Clock bounded for the same reason as the mapping commit: an attempt
+         * costs whatever a failed transfer costs, and here the adapter is on
+         * its way out, so every attempt is a failed one. */
+        while (ticks_to_millisecs(diff_ticks(wait_start, gettime())) < 3000) {
             if (ota_status(chan, &state, &s, &ver) == 0 && state == GC_OTA_DONE) {
                 break;
             }
