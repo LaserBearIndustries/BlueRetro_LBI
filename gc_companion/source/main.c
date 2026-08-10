@@ -1796,14 +1796,34 @@ static void cfg_restore(int chan, u32 size) {
             break;
         }
         if (ticks_to_millisecs(diff_ticks(start, gettime())) > 5000) {
+            int ok = (cfg_info(chan, &state, &reported, NULL) == 0);
+
             printf("\nThe adapter never became ready. Nothing applied.\n");
-            /* Far and away the likeliest reason, since the ready state and the
-             * wait for it arrived in the same commit: an adapter running older
-             * firmware than this app will never report it. */
+
+            /* Which half is stuck is worth one line, and guessing it from the
+             * outside has already cost a round. Idle means the start command
+             * never landed; busy means it did and the task that clears the
+             * buffer never ran. */
+            printf("\n  last state read: ");
+            if (!ok) {
+                printf("no reply\n");
+            }
+            else {
+                switch (state) {
+                    case GC_CFG_ST_IDLE:
+                        printf("idle - the start command never arrived\n");
+                        break;
+                    case GC_CFG_ST_BUSY:
+                        printf("busy - it arrived, the adapter never finished\n");
+                        break;
+                    default:
+                        printf("%u\n", state);
+                        break;
+                }
+            }
             printf("\n  app      %s\n", APP_VERSION);
             printf("  adapter  %s\n", adapter_ver[0] ? adapter_ver : "unknown");
-            printf("\nIf those differ, flash the firmware that came with this\n");
-            printf("app and try again.\n");
+
             cfg_cmd(chan, GC_CFG_SUB_ABORT);
             fclose(f);
             return;

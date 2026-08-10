@@ -169,5 +169,16 @@ static void gc_cfg_task(void *arg) {
 }
 
 void gc_cfg_init(void) {
-    xTaskCreatePinnedToCore(gc_cfg_task, "gc_cfg_task", 4096, NULL, 5, NULL, 0);
+    /* Checked, because the failure is otherwise silent and indistinguishable
+     * from the feature simply not working: nothing would ever clear the
+     * staging buffer and every restore would sit waiting for a ready that
+     * cannot come. */
+    if (xTaskCreatePinnedToCore(gc_cfg_task, "gc_cfg_task", 4096, NULL, 5, NULL, 0)
+            != pdPASS) {
+        printf("# %s: task create failed, settings transfer unavailable\n",
+            __FUNCTION__);
+        return;
+    }
+    printf("# %s: ready, %u byte config in %u chunks\n", __FUNCTION__,
+        (unsigned)sizeof(struct config), (unsigned)GC_CFG_CHUNK_CNT);
 }
