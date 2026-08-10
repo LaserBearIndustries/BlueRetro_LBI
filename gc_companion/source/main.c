@@ -160,6 +160,7 @@ static volatile u32 si_done = 0;
 static u16 pad_any_down(void);
 static u16 pad_any_held(void);
 static void pad_settle(void);
+static void pad_reattach(void);
 static void wait_ack(void);
 static int prompt_again(void);
 static void app_exit(void);
@@ -1183,6 +1184,31 @@ static void pad_settle(void) {
     }
 }
 
+/* For after the adapter restarts, which takes all four ports away and brings
+ * them back.
+ *
+ * libogc does re-probe a controller that vanished, but only from inside
+ * PAD_ScanPads(), only once it has seen PAD_ERR_NO_CONTROLLER, and only
+ * asynchronously: it calls PAD_Reset(), which disables SI polling on that
+ * channel for the duration of the probe. pad_settle() spends its twenty frames
+ * forcing polling back on across all four channels, outside that bookkeeping,
+ * which lands straight on top of a probe that has only just started. The pad
+ * then never comes back and there is no way left to press anything.
+ *
+ * So ask for the probe deliberately and then leave libogc alone long enough to
+ * finish it, scanning but not touching polling. */
+static void pad_reattach(void) {
+    int i;
+
+    SI_EnablePolling(SI_CHAN0_BIT|SI_CHAN1_BIT|SI_CHAN2_BIT|SI_CHAN3_BIT);
+    PAD_Reset(PAD_CHAN0_BIT|PAD_CHAN1_BIT|PAD_CHAN2_BIT|PAD_CHAN3_BIT);
+
+    for (i = 0; i < 240; i++) {
+        PAD_ScanPads();
+        VIDEO_WaitVSync();
+    }
+}
+
 /* Waits for a sustained hold rather than an edge. A remapped controller can
  * produce spurious edges, from a stick sitting near a threshold or a button
  * still down from the last capture, and a single stray edge should not decide
@@ -1649,12 +1675,12 @@ static void firmware_slots_menu(void) {
 
         printf("\x1b[2J\x1b[1;1H");
         printf("Booting %s. The adapter is restarting.\n", slot_name[sel]);
+        printf("\nWaiting for the ports to come back...\n");
 
-        /* Give it long enough to actually go away and come back before the
-         * loop above starts polling again. */
-        for (i = 0; i < 180; i++) {
-            VIDEO_WaitVSync();
-        }
+        /* Long enough for it to actually go away and return, and it re-probes
+         * the ports on the way out: they were gone, and libogc will not notice
+         * them return on its own in time. */
+        pad_reattach();
     }
 }
 
@@ -1871,7 +1897,9 @@ int main(int argc, char **argv) {
         }
     }
 
-    pad_settle();
+    /* Same restart as a slot swap, so the ports need the same re-probe before
+     * anything can be pressed. */
+    pad_reattach();
     fclose(f);
     wait_exit();
     return 0;
