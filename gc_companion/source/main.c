@@ -1645,6 +1645,10 @@ static void read_adapter_version(void) {
  * than surfacing as whichever generic failure happens to come first. */
 static u8 cfg_peer_proto = 0;
 
+/* The adapter's task counter. A task working slowly and one not running at all
+ * look identical from here without it. */
+static u8 cfg_peer_tick = 0;
+
 static int cfg_info(int chan, u8 *state, u32 *size, u8 *why, u16 *detail) {
     static u8 req[32] ATTRIBUTE_ALIGN(32);
     static u8 in[32] ATTRIBUTE_ALIGN(32);
@@ -1674,6 +1678,7 @@ static int cfg_info(int chan, u8 *state, u32 *size, u8 *why, u16 *detail) {
     if (detail) {
         *detail = (u16)in[6] | ((u16)in[7] << 8);
     }
+    cfg_peer_tick = in[5];
     return (*size && *size <= CFG_SIZE_MAX) ? 0 : -1;
 }
 
@@ -1771,6 +1776,7 @@ static void cfg_restore(int chan, u32 size) {
     u32 reported = 0;
     u8 why = GC_CFG_WHY_NONE;
     u16 detail = 0;
+    u8 tick0 = 0;
     u64 start;
     int last_pct = -1;
 
@@ -1878,19 +1884,45 @@ static void cfg_restore(int chan, u32 size) {
     fclose(f);
 
     printf("\nApplying...\n");
+    tick0 = cfg_peer_tick;
     cfg_cmd(chan, GC_CFG_SUB_APPLY);
 
+    /* Generous, because adopting it writes the whole config to the adapter's
+     * filesystem and then reopens a mapping file per port. SPIFFS is in no
+     * hurry about either, and ten seconds was short enough to expire on a
+     * restore that was working. */
     start = gettime();
-    while (ticks_to_millisecs(diff_ticks(start, gettime())) < 10000) {
+    while (ticks_to_millisecs(diff_ticks(start, gettime())) < 60000) {
         if (cfg_info(chan, &state, &reported, &why, &detail) == 0
                 && (state == GC_CFG_ST_OK || state == GC_CFG_ST_ERROR)) {
             break;
+        }
+        if (((ticks_to_millisecs(diff_ticks(start, gettime())) / 500) & 1) == 0) {
+            printf("\r  working  ");
+        }
+        else {
+            printf("\r  working. ");
         }
         usleep(10000);
     }
 
     if (state == GC_CFG_ST_OK) {
         printf("\nSettings restored. They are live now.\n");
+    }
+    else if (state != GC_CFG_ST_ERROR) {
+        /* Ran out of patience rather than being refused. Those were the same
+         * branch, so a slow apply reported itself as a rejection with a reason
+         * code the adapter never sets. */
+        printf("\nStill applying after a minute. Nothing has been lost.\n\n");
+        printf("  The adapter last said state %u.\n", state);
+        if (cfg_peer_tick == tick0) {
+            printf("  Its settings task has not run once in that time, so it\n");
+            printf("  is stuck rather than slow.\n");
+        }
+        else {
+            printf("  Its settings task is running, just not finishing.\n");
+        }
+        printf("  Leave and re-enter this screen to see where it got to.\n");
     }
     else {
         printf("\nThe adapter rejected it. Nothing changed.\n\n");

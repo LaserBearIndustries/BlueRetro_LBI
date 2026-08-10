@@ -36,6 +36,11 @@ static volatile uint8_t cfg_req = GC_CFG_REQ_NONE;
 static volatile uint8_t cfg_why = GC_CFG_WHY_NONE;
 static volatile uint16_t cfg_detail = 0;
 
+/* Bumped every pass of the task. Reported so the console can tell a task
+ * that is working slowly from one that is not running at all, which are
+ * indistinguishable from the outside and have nothing in common. */
+static volatile uint8_t cfg_tick = 0;
+
 void IRAM_ATTR gc_cfg_info(uint8_t *out) {
     uint32_t size = sizeof(struct config);
 
@@ -44,7 +49,7 @@ void IRAM_ATTR gc_cfg_info(uint8_t *out) {
     out[2] = (uint8_t)size;
     out[3] = (uint8_t)(size >> 8);
     out[4] = cfg_why;
-    out[5] = 0;
+    out[5] = cfg_tick;
     out[6] = (uint8_t)cfg_detail;
     out[7] = (uint8_t)(cfg_detail >> 8);
 }
@@ -160,6 +165,8 @@ static uint32_t gc_cfg_staged_is_sane(void) {
 static void gc_cfg_task(void *arg) {
     while (1) {
         uint8_t req = cfg_req;
+
+        cfg_tick++;
 
         if (req != GC_CFG_REQ_NONE) {
             cfg_req = GC_CFG_REQ_NONE;
