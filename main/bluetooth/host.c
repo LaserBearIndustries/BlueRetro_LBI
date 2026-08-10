@@ -246,12 +246,14 @@ static void bt_fb_task(void *param) {
                     break;
                 case FB_TYPE_GAME_ID:
                     if (gid_update(fb_data)) {
+                        gid_hist_push(gid_get());
                         config_init(GAMEID_CFG);
                         bt_host_reload_ctrl_maps();
                     }
                     break;
                 case FB_TYPE_SYS_ID:
                     if (gid_update_sys(fb_data)) {
+                        gid_hist_push(gid_get());
                         config_init(GAMEID_CFG);
                         bt_host_reload_ctrl_maps();
                     }

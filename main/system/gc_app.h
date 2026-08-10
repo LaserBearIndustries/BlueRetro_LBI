@@ -49,17 +49,20 @@ void gc_app_input_update(uint8_t dev_id, struct wireless_ctrl *ctrl);
 /* True while that port's output is being held neutral for capture. */
 uint32_t gc_app_is_muted(uint8_t out_idx);
 
-/* Scope byte on a commit. Mirrors CTRL_MAP_SCOPE_* in config.h. */
+/* Scope byte on a commit. Zero writes the profile used for every game;
+ * anything else is a history index plus one, so the mapping can be attached
+ * to a game that ran earlier rather than only to whatever is running now.
+ * Which matters, because what is running now is this app. */
 #define GC_APP_SCOPE_GLOBAL 0
-#define GC_APP_SCOPE_GAME 1
+#define GC_APP_SCOPE_GAME_BASE 1
 
-/* Current game id, handed back a slice at a time. Empty means no game has
- * identified itself, so a per game profile cannot be saved. */
+/* Recently launched game ids, newest first, a slice at a time. Index 0 is
+ * the current one. Empty means nothing has identified itself. */
 #define GC_APP_GID_LEN 24
 #define GC_APP_GID_CHUNK 8
 
 /* All four called straight from the RMT ISR. */
-void gc_app_gameid(uint8_t chunk, uint8_t *out);
+void gc_app_gameid(uint8_t idx, uint8_t chunk, uint8_t *out);
 void gc_app_input_read(uint8_t *out);
 void gc_app_map_cmd(const uint8_t *payload);
 void gc_app_mode_cmd(const uint8_t *payload);

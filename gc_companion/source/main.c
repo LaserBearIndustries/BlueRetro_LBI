@@ -20,6 +20,7 @@
 #include <gccore.h>
 #include <ogc/lwp_watchdog.h>
 #include <fat.h>
+#include <ctype.h>
 
 /* Must match main/wired/nsi.c and main/system/gc_ota.h in the firmware. */
 #define GC_OTA_CMD 0x1E
@@ -69,7 +70,11 @@
 #define GC_APP_GID_LEN 24
 #define GC_APP_GID_CHUNK 8
 #define GC_APP_SCOPE_GLOBAL 0
-#define GC_APP_SCOPE_GAME 1
+#define GC_APP_SCOPE_GAME_BASE 1
+#define GID_HIST_MAX 4
+
+#define GID_TITLES_PATH "blueretro_games.txt"
+#define GID_TITLE_LEN 40
 
 /* Debug log download. */
 #define GC_LOG_CMD 0x24
@@ -690,7 +695,7 @@ static int trigger_mode_menu(void) {
 }
 
 /* Returns 1 if the user wants to map another controller. */
-static int app_get_gameid(int chan, char *out) {
+static int app_get_gameid(int chan, int idx, char *out) {
     static u8 req[32] ATTRIBUTE_ALIGN(32);
     static u8 in[32] ATTRIBUTE_ALIGN(32);
     int chunk;
@@ -699,10 +704,11 @@ static int app_get_gameid(int chan, char *out) {
 
     for (chunk = 0; chunk < GC_APP_GID_LEN / GC_APP_GID_CHUNK; chunk++) {
         req[0] = GC_APP_GID_CMD;
-        req[1] = (u8)chunk;
+        req[1] = (u8)idx;
+        req[2] = (u8)chunk;
         memset(in, 0, sizeof(in));
 
-        if (si_xfer(chan, req, 2, in, GC_APP_GID_CHUNK) < 0) {
+        if (si_xfer(chan, req, 3, in, GC_APP_GID_CHUNK) < 0) {
             return -1;
         }
         memcpy(out + chunk * GC_APP_GID_CHUNK, in, GC_APP_GID_CHUNK);
@@ -711,11 +717,88 @@ static int app_get_gameid(int chan, char *out) {
     return 0;
 }
 
-/* Only worth asking when a game has actually identified itself. Nothing
- * sends a game id until one boots, so on the Swiss menu there is no choice
- * to make and the question would just be noise. */
-static u8 scope_menu(const char *gameid) {
-    int sel = 0;
+/* GameCube ids arrive hex encoded, so GALE01 reaches us as 47414C453031.
+ * Decode it back for display, but only when the whole thing decodes to
+ * printable characters: other systems put the id on the wire as text and
+ * would be mangled by this. */
+static void gid_readable(const char *raw_id, char *out, int out_len) {
+    int len = strlen(raw_id), i, n = 0;
+
+    snprintf(out, out_len, "%s", raw_id);
+
+    if (len < 2 || (len & 1)) {
+        return;
+    }
+
+    for (i = 0; i + 1 < len && n < out_len - 1; i += 2) {
+        int hi = raw_id[i], lo = raw_id[i + 1], v;
+
+        if (!isxdigit(hi) || !isxdigit(lo)) {
+            return;
+        }
+        v = (int)strtol((char[]){(char)hi, (char)lo, 0}, NULL, 16);
+        if (v == 0) {
+            break;
+        }
+        if (v < 0x20 || v > 0x7E) {
+            return;
+        }
+        out[n++] = (char)v;
+    }
+
+    if (n) {
+        out[n] = 0;
+    }
+}
+
+/* Optional. A plain ID=Title per line file on the card, so the list can be
+ * refreshed from the web config's without rebuilding anything. Absent, or
+ * missing an entry, and the id stands on its own. */
+static void gid_title(const char *id, char *out, int out_len) {
+    char line[128];
+    FILE *f;
+
+    snprintf(out, out_len, "%s", id);
+
+    f = fopen(GID_TITLES_PATH, "r");
+    if (!f) {
+        f = fopen("sd:/" GID_TITLES_PATH, "r");
+    }
+    if (!f) {
+        return;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        char *eq = strchr(line, '=');
+        int n;
+
+        if (!eq) {
+            continue;
+        }
+        *eq = 0;
+        if (strcmp(line, id) != 0) {
+            continue;
+        }
+
+        eq++;
+        n = strlen(eq);
+        while (n && (eq[n - 1] == '\n' || eq[n - 1] == '\r')) {
+            eq[--n] = 0;
+        }
+        if (n) {
+            snprintf(out, out_len, "%s", eq);
+        }
+        break;
+    }
+    fclose(f);
+}
+
+/* The list is recent launches, newest first, and the newest is almost always
+ * this app: running it is a launch like any other. So the game being mapped
+ * is usually the second entry, and the cursor starts there. */
+static u8 scope_menu(char names[GID_HIST_MAX][GID_TITLE_LEN + 1], int cnt) {
+    int sel = (cnt > 1) ? 1 : 0;
+    int i;
 
     for (;;) {
         u16 down;
@@ -723,11 +806,17 @@ static u8 scope_menu(const char *gameid) {
         printf("\x1b[2J\x1b[1;1H");
         printf("Save this mapping for\n");
         printf("=====================\n\n");
-        printf("   %s %s only\n", sel == 0 ? ">" : " ", gameid);
-        printf("   %s Every game\n", sel == 1 ? ">" : " ");
-        printf("\n  A per game profile wins over the general one when\n");
-        printf("  that game is running, and the general one is left\n");
-        printf("  alone either way.\n");
+
+        for (i = 0; i < cnt; i++) {
+            printf("   %s %-40s%s\n", sel == i ? ">" : " ", names[i],
+                i == 0 ? " (just launched)" : "");
+        }
+        printf("   %s Every game\n", sel == cnt ? ">" : " ");
+
+        printf("\n  A per game profile wins over the general one while\n");
+        printf("  that game is running. The general one is left alone\n");
+        printf("  either way.\n");
+        printf("\n  The top entry is usually this app rather than a game.\n");
         printf("\n  D-pad to choose, A to save.\n");
 
         do {
@@ -735,11 +824,15 @@ static u8 scope_menu(const char *gameid) {
             VIDEO_WaitVSync();
         } while (!down);
 
-        if (down & (PAD_BUTTON_UP | PAD_BUTTON_DOWN)) {
-            sel ^= 1;
+        if (down & PAD_BUTTON_UP) {
+            sel = (sel + cnt) % (cnt + 1);
+        }
+        if (down & PAD_BUTTON_DOWN) {
+            sel = (sel + 1) % (cnt + 1);
         }
         if (down & PAD_BUTTON_A) {
-            return sel == 0 ? GC_APP_SCOPE_GAME : GC_APP_SCOPE_GLOBAL;
+            return (sel == cnt) ? GC_APP_SCOPE_GLOBAL
+                : (u8)(GC_APP_SCOPE_GAME_BASE + sel);
         }
     }
 }
@@ -887,12 +980,24 @@ static int mapping_wizard(void) {
         }
     }
     {
+        char names[GID_HIST_MAX][GID_TITLE_LEN + 1];
         char gameid[GC_APP_GID_LEN + 1];
+        char readable[GC_APP_GID_LEN + 1];
         u8 scope = GC_APP_SCOPE_GLOBAL;
+        int cnt = 0, k;
 
-        if (app_get_gameid(chan, gameid) == 0 && gameid[0]) {
+        for (k = 0; k < GID_HIST_MAX; k++) {
+            if (app_get_gameid(chan, k, gameid) < 0 || !gameid[0]) {
+                break;
+            }
+            gid_readable(gameid, readable, sizeof(readable));
+            gid_title(readable, names[cnt], GID_TITLE_LEN + 1);
+            cnt++;
+        }
+
+        if (cnt) {
             pad_settle();
-            scope = scope_menu(gameid);
+            scope = scope_menu(names, cnt);
             si_grab();
         }
 

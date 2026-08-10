@@ -31,9 +31,9 @@ static volatile uint8_t stage_cnt = 0;
 static volatile uint8_t stage_scope = GC_APP_SCOPE_GLOBAL;
 static volatile uint8_t map_status = GC_APP_ST_IDLE;
 
-/* DRAM copy of the current game id, refreshed by the task. The ISR cannot read
- * gid_get()'s storage, which is flash mapped and gone during an OTA write. */
-static char gid_snap[GC_APP_GID_LEN] = {0};
+/* DRAM copy of the recent game ids, refreshed by the task. The ISR cannot read
+ * gameid.c's storage, which is flash mapped and gone during an OTA write. */
+static char gid_snap[GID_HIST_MAX][GC_APP_GID_LEN] = {{0}};
 
 enum {
     GC_APP_REQ_NONE = 0,
@@ -112,13 +112,18 @@ void IRAM_ATTR gc_app_input_read(uint8_t *out) {
     }
 }
 
-/* Mirrored into DRAM rather than read from gid_get() here, because this is
- * reached from the ISR and the game id lives in flash mapped memory. */
-void IRAM_ATTR gc_app_gameid(uint8_t chunk, uint8_t *out) {
+/* Served from the DRAM mirror, because this is reached from the ISR and the
+ * ids themselves live in flash mapped memory. */
+void IRAM_ATTR gc_app_gameid(uint8_t idx, uint8_t chunk, uint8_t *out) {
     uint32_t off = (uint32_t)chunk * GC_APP_GID_CHUNK;
 
+    if (idx >= GID_HIST_MAX) {
+        memset(out, 0, GC_APP_GID_CHUNK);
+        return;
+    }
+
     for (uint32_t i = 0; i < GC_APP_GID_CHUNK; i++) {
-        out[i] = ((off + i) < GC_APP_GID_LEN) ? gid_snap[off + i] : 0;
+        out[i] = ((off + i) < GC_APP_GID_LEN) ? gid_snap[idx][off + i] : 0;
     }
 }
 
@@ -212,8 +217,13 @@ static void gc_app_task(void *arg) {
                             struct bt_dev *dev = NULL;
 
                             if (bt_host_get_dev_from_out_idx(port, &dev) >= 0) {
+                                uint8_t scope = stage_scope;
+                                const char *gid = (scope == GC_APP_SCOPE_GLOBAL)
+                                    ? NULL
+                                    : gid_hist_get(scope - GC_APP_SCOPE_GAME_BASE);
+
                                 config_save_ctrl_map(port, bt_host_dev_bdaddr(dev),
-                                    stage_scope);
+                                    gid);
                             }
                         }
 #endif
@@ -239,8 +249,10 @@ static void gc_app_task(void *arg) {
         }
 
         /* Cheap, and it means the ISR never has to reach into flash mapped
-         * memory for a string that changes when a game boots. */
-        strncpy(gid_snap, gid_get(), sizeof(gid_snap) - 1);
+         * memory for strings that change when a game boots. */
+        for (uint32_t i = 0; i < GID_HIST_MAX; i++) {
+            strncpy(gid_snap[i], gid_hist_get(i), GC_APP_GID_LEN - 1);
+        }
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }

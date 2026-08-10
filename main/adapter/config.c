@@ -588,24 +588,18 @@ static uint32_t gid_hash(const char *str) {
     return hash;
 }
 
-/* Returns -1 when a per game name was asked for and no game is known. */
-static int32_t ctrl_map_filename(char *out, uint32_t len, const uint8_t *bdaddr,
-        uint32_t scope) {
-    if (scope == CTRL_MAP_SCOPE_GAME) {
-        const char *gameid = gid_get();
-
-        if (!strlen(gameid)) {
-            return -1;
-        }
+/* A NULL or empty gameid names the profile that applies to every game. */
+static void ctrl_map_filename(char *out, uint32_t len, const uint8_t *bdaddr,
+        const char *gameid) {
+    if (gameid && strlen(gameid)) {
         snprintf(out, len, "%s%08lX_%02X%02X%02X%02X%02X%02X",
             CTRL_MAP_GAME_FILE_PFX, (unsigned long)gid_hash(gameid),
             bdaddr[5], bdaddr[4], bdaddr[3], bdaddr[2], bdaddr[1], bdaddr[0]);
-        return 0;
+        return;
     }
 
     snprintf(out, len, "%s%02X%02X%02X%02X%02X%02X", CTRL_MAP_FILE_PFX,
         bdaddr[5], bdaddr[4], bdaddr[3], bdaddr[2], bdaddr[1], bdaddr[0]);
-    return 0;
 }
 
 /* Which scope the map currently on a port came from, so the app can say so and
@@ -617,7 +611,7 @@ uint32_t config_ctrl_map_is_game(uint32_t out_idx) {
 }
 
 static int32_t config_load_ctrl_map_scope(uint32_t out_idx, const uint8_t *bdaddr,
-        uint32_t scope) {
+        const char *gameid) {
     char filename[32];
     struct ctrl_map_hdr hdr;
     FILE *file;
@@ -626,9 +620,7 @@ static int32_t config_load_ctrl_map_scope(uint32_t out_idx, const uint8_t *bdadd
         return -1;
     }
 
-    if (ctrl_map_filename(filename, sizeof(filename), bdaddr, scope) < 0) {
-        return -1;
-    }
+    ctrl_map_filename(filename, sizeof(filename), bdaddr, gameid);
     file = fopen(filename, "rb");
     if (file == NULL) {
         /* Never mapped, so whatever the port already has stands. */
@@ -659,7 +651,7 @@ static int32_t config_load_ctrl_map_scope(uint32_t out_idx, const uint8_t *bdadd
         config.in_cfg[out_idx].map_cfg[i].dst_id = out_idx;
     }
 
-    ctrl_map_scope[out_idx] = (scope == CTRL_MAP_SCOPE_GAME) ? 1 : 0;
+    ctrl_map_scope[out_idx] = (gameid && strlen(gameid)) ? 1 : 0;
 
     printf("# %s: %s -> port %lu, %u entries\n", __FUNCTION__, filename,
         out_idx, hdr.map_size);
@@ -670,13 +662,14 @@ static int32_t config_load_ctrl_map_scope(uint32_t out_idx, const uint8_t *bdadd
  * general, so try that first and fall back. Nothing here writes the fallback,
  * so a game specific profile never shadows the general one permanently. */
 int32_t config_load_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr) {
-    if (config_load_ctrl_map_scope(out_idx, bdaddr, CTRL_MAP_SCOPE_GAME) == 0) {
+    if (config_load_ctrl_map_scope(out_idx, bdaddr, gid_get()) == 0) {
         return 0;
     }
-    return config_load_ctrl_map_scope(out_idx, bdaddr, CTRL_MAP_SCOPE_GLOBAL);
+    return config_load_ctrl_map_scope(out_idx, bdaddr, NULL);
 }
 
-int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr, uint32_t scope) {
+int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr,
+        const char *gameid) {
     char filename[32];
     struct ctrl_map_hdr hdr = {
         .magic = CTRL_MAP_MAGIC,
@@ -696,10 +689,7 @@ int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr, uint32_t s
     }
     hdr.map_size = (uint8_t)cnt;
 
-    if (ctrl_map_filename(filename, sizeof(filename), bdaddr, scope) < 0) {
-        printf("# %s: no game id, cannot save a per game profile\n", __FUNCTION__);
-        return -1;
-    }
+    ctrl_map_filename(filename, sizeof(filename), bdaddr, gameid);
     file = fopen(filename, "wb");
     if (file == NULL) {
         printf("# %s: failed to open %s for writing\n", __FUNCTION__, filename);
@@ -715,7 +705,7 @@ int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr, uint32_t s
     }
     fclose(file);
 
-    ctrl_map_scope[out_idx] = (scope == CTRL_MAP_SCOPE_GAME) ? 1 : 0;
+    ctrl_map_scope[out_idx] = (gameid && strlen(gameid)) ? 1 : 0;
 
     printf("# %s: %s saved, %lu entries\n", __FUNCTION__, filename, cnt);
     return 0;

@@ -107,13 +107,12 @@ void config_init(uint32_t src);
 void config_update(uint32_t dst);
 uint32_t config_get_src(void);
 int32_t config_load_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr);
-/* scope picks which profile is written: this game, or every game. */
-enum {
-    CTRL_MAP_SCOPE_GLOBAL = 0,
-    CTRL_MAP_SCOPE_GAME,
-};
-
-int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr, uint32_t scope);
+/* gameid NULL or empty writes the profile that applies to every game.
+ * Anything else writes the profile for that game specifically, and it does
+ * not have to be the game running now: the one being configured usually
+ * ran before whatever launched this. */
+int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr,
+    const char *gameid);
 uint32_t config_ctrl_map_is_game(uint32_t out_idx);
 void config_debug_log(void);
 

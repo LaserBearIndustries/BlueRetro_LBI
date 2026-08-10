@@ -324,12 +324,14 @@ static void nsi_app_mode_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
 
 static void nsi_app_gid_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     uint8_t crc;
-    uint8_t chunk;
+    uint8_t idx, chunk;
 
-    nsi_items_to_bytes(item, buf, 1);
-    chunk = buf[0];
+    /* Which of the recent ids, and which slice of it. */
+    nsi_items_to_bytes(item, buf, 2);
+    idx = buf[0];
+    chunk = buf[1];
 
-    gc_app_gameid(chunk, buf);
+    gc_app_gameid(idx, chunk, buf);
     nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, GC_APP_GID_CHUNK, &crc, STOP_BIT_2US);
     RMT.conf_ch[channel].conf1.tx_start = 1;
 }
