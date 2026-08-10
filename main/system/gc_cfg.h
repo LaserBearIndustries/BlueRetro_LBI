@@ -41,6 +41,10 @@ enum {
     GC_CFG_WHY_MISSING_CHUNK,   /* detail: the chunk that never arrived */
     GC_CFG_WHY_BAD_MAGIC,       /* detail: low half of the magic that was staged */
     GC_CFG_WHY_BAD_MAP_SIZE,    /* detail: the port whose map_size was too big */
+    /* The transfer never had a chance: the task that adopts a config could
+     * not be created at boot. Reported rather than left to look like a
+     * refusal, which is how it presented for four rounds. */
+    GC_CFG_WHY_NO_TASK,
 };
 
 /* Sub command, carried in the first payload byte. */

@@ -192,12 +192,14 @@ static void gc_cfg_task(void *arg) {
 }
 
 void gc_cfg_init(void) {
-    /* Checked, because the failure is otherwise silent and indistinguishable
-     * from the feature simply not working: nothing would ever clear the
-     * staging buffer and every restore would sit waiting for a ready that
-     * cannot come. */
+    /* Reported over the wire, not just logged. Without the task nothing ever
+     * adopts a config, so every restore waits on something that will never
+     * happen, and from the console that is indistinguishable from a refusal.
+     * It presented as one for four rounds. */
     if (xTaskCreatePinnedToCore(gc_cfg_task, "gc_cfg_task", 4096, NULL, 5, NULL, 0)
             != pdPASS) {
+        cfg_state = GC_CFG_ST_ERROR;
+        cfg_why = GC_CFG_WHY_NO_TASK;
         printf("# %s: task create failed, settings transfer unavailable\n",
             __FUNCTION__);
         return;

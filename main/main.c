@@ -130,6 +130,15 @@ static void wl_init_task(void *arg) {
     sys_mgr_early_pwr_restore();
 #endif
 
+#ifdef CONFIG_BLUERETRO_GC_CFG
+    /* Ahead of the memory card claiming its buffers. That takes 128 KB of DMA
+     * capable heap in one go, and this needs a task stack from the same pool.
+     * Asking afterwards, as the last init to run, meant asking for whatever was
+     * left, and there was not enough: the task was never created and every
+     * restore sat waiting on it. */
+    gc_cfg_init();
+#endif
+
     mc_init_mem();
 
 #ifndef CONFIG_BLUERETRO_BT_DISABLE
@@ -158,10 +167,6 @@ static void wl_init_task(void *arg) {
 
 #ifdef CONFIG_BLUERETRO_GC_BOOT
     gc_boot_init();
-#endif
-
-#ifdef CONFIG_BLUERETRO_GC_CFG
-    gc_cfg_init();
 #endif
 
 #ifndef CONFIG_BLUERETRO_QEMU

@@ -96,6 +96,7 @@
 #define GC_CFG_WHY_MISSING_CHUNK 1
 #define GC_CFG_WHY_BAD_MAGIC 2
 #define GC_CFG_WHY_BAD_MAP_SIZE 3
+#define GC_CFG_WHY_NO_TASK 4
 #define GC_CFG_SUB_BEGIN 0
 #define GC_CFG_SUB_APPLY 1
 #define GC_CFG_SUB_ABORT 2
@@ -1940,6 +1941,11 @@ static void cfg_restore(int chan, u32 size) {
             case GC_CFG_WHY_BAD_MAP_SIZE:
                 printf("  Port %u claims more mappings than fit.\n", detail);
                 break;
+            case GC_CFG_WHY_NO_TASK:
+                printf("  The adapter could not start its settings task at\n");
+                printf("  boot, so nothing there can adopt a config. That\n");
+                printf("  needs a firmware fix, not another attempt.\n");
+                break;
             default:
                 printf("  Reason %u.\n", why);
                 break;
@@ -1950,12 +1956,13 @@ static void cfg_restore(int chan, u32 size) {
 static void settings_menu(void) {
     u8 state = 0;
     u32 size = 0;
+    u8 why0 = GC_CFG_WHY_NONE;
     int chan, sel = 0, ret = -1;
 
     si_grab();
     chan = ota_find_adapter();
     if (chan >= 0) {
-        ret = cfg_info(chan, &state, &size, NULL, NULL);
+        ret = cfg_info(chan, &state, &size, &why0, NULL);
     }
     pad_settle();
 
@@ -1972,6 +1979,15 @@ static void settings_menu(void) {
         printf("  app      %s\n", APP_VERSION);
         printf("  adapter  %s\n\n", adapter_ver[0] ? adapter_ver : "unknown");
         printf("  Flash the firmware that came with this app.\n");
+        wait_ack();
+        return;
+    }
+
+    /* Up front, rather than after a full transfer discovers it. */
+    if (ret == 0 && state == GC_CFG_ST_ERROR && why0 == GC_CFG_WHY_NO_TASK) {
+        printf("\nThe adapter could not start its settings task at boot, so\n");
+        printf("it cannot back up or restore anything. The rest of the app\n");
+        printf("is unaffected.\n");
         wait_ack();
         return;
     }
