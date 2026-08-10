@@ -1612,6 +1612,59 @@ static int boot_confirm(int slot, const char *ver) {
     }
 }
 
+/* The adapter is in no hurry. It validates the image it has been told to
+ * boot, checksumming the better part of a megabyte, and only then queues the
+ * restart, which waits a further second of its own before calling
+ * esp_restart(). The ports do not drop until that fires. So for several
+ * seconds after the command the adapter is alive and answering, and then it
+ * is gone for several more.
+ *
+ * Guessing a duration got this wrong twice. Watch the two edges instead: the
+ * moment it stops answering, and the moment it answers again.
+ *
+ * The bus stays held for the whole wait. Re-probing the pads here is what the
+ * previous attempt did, and libogc's probe packets sit on exactly the
+ * channels these reads need, so every read came back refused and the screen
+ * concluded the firmware had no slot support. Pads are reattached once, at
+ * the end, when nothing else wants the bus. */
+static void boot_wait_restart(int chan) {
+    u8 running, next, mask, state;
+    u64 start = gettime();
+    int gone = 0, dots = 0;
+
+    printf("\n  Waiting for the adapter to restart");
+
+    while (ticks_to_millisecs(diff_ticks(start, gettime())) < 40000) {
+        int ok = (boot_info(chan, &running, &next, &mask, &state) == 0);
+
+        if (ok && !gone && state == GC_BOOT_ST_ERROR) {
+            /* Refused before it ever got as far as restarting, so there is
+             * nothing here to wait for. */
+            printf("\n\n  The adapter refused that slot.\n");
+            return;
+        }
+
+        if (!gone && !ok) {
+            gone = 1;
+            dots = 0;
+            printf("\n  Ports dropped, waiting for them to come back");
+        }
+        else if (gone && ok) {
+            printf("\n\n  Back on slot %u.\n", running);
+            return;
+        }
+
+        if (++dots >= 20) {
+            dots = 0;
+            printf(".");
+        }
+        VIDEO_WaitVSync();
+    }
+
+    printf("\n\n  Gave up waiting. If the adapter came back on its own,\n");
+    printf("  leave and re-enter this screen to see where it landed.\n");
+}
+
 static void firmware_slots_menu(void) {
     char ver[GC_BOOT_SLOT_CNT][GC_BOOT_VER_LEN + 1];
     u8 running = 0, next = 0, mask = 0, state = 0;
@@ -1631,8 +1684,6 @@ static void firmware_slots_menu(void) {
     for (;;) {
         u16 down;
 
-        /* Tolerant of a few failures: selecting a slot restarts the adapter,
-         * so the link is legitimately absent for a moment afterwards. */
         for (tries = 0; tries < 10; tries++) {
             if (boot_read_all(chan, &running, &next, &mask, &state, ver) == 0) {
                 break;
@@ -1640,8 +1691,13 @@ static void firmware_slots_menu(void) {
             VIDEO_WaitVSync();
         }
         if (tries == 10) {
-            printf("\nThis firmware has no slot support.\n");
-            printf("Rebuild with CONFIG_BLUERETRO_GC_BOOT.\n");
+            /* Only reachable on the way in. After a swap the wait below has
+             * already established the adapter is back, and reporting missing
+             * support there was simply wrong: the firmware had just answered
+             * these same reads a moment earlier. */
+            printf("\nThe adapter is not answering the slot commands.\n");
+            printf("If this firmware predates them, rebuild it with\n");
+            printf("CONFIG_BLUERETRO_GC_BOOT.\n");
             wait_ack();
             return;
         }
@@ -1700,17 +1756,14 @@ static void firmware_slots_menu(void) {
             continue;
         }
 
+        printf("\x1b[2J\x1b[1;1H");
+        printf("Booting %s.\n", slot_name[sel]);
+
         si_grab();
         boot_select(chan, (u8)sel);
-        pad_settle();
+        boot_wait_restart(chan);
 
-        printf("\x1b[2J\x1b[1;1H");
-        printf("Booting %s. The adapter is restarting.\n", slot_name[sel]);
-        printf("\nWaiting for the ports to come back...\n");
-
-        /* Long enough for it to actually go away and return, and it re-probes
-         * the ports on the way out: they were gone, and libogc will not notice
-         * them return on its own in time. */
+        /* Only now, with the adapter back and nothing else on the bus. */
         pad_reattach();
     }
 }
