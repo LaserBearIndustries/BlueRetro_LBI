@@ -83,6 +83,21 @@
 
 #define LOG_PATH "br_debug_trace.bin"
 
+/* Firmware slot selection. */
+#define GC_BOOT_INFO_CMD 0x27
+#define GC_BOOT_VER_CMD 0x28
+#define GC_BOOT_SEL_CMD 0x29
+#define GC_BOOT_INFO_LEN 8
+#define GC_BOOT_VER_LEN 32
+#define GC_BOOT_VER_CHUNK 8
+#define GC_BOOT_PROTO_VER 1
+#define GC_BOOT_SLOT_CNT 3
+
+#define GC_BOOT_ST_IDLE 0
+#define GC_BOOT_ST_BUSY 1
+#define GC_BOOT_ST_OK 2
+#define GC_BOOT_ST_ERROR 3
+
 /* Generic button ids the GameCube driver understands, from adapter.h:108. */
 #define PAD_LX_LEFT 0
 #define PAD_LX_RIGHT 1
@@ -145,6 +160,7 @@ static volatile u32 si_done = 0;
 static u16 pad_any_down(void);
 static u16 pad_any_held(void);
 static void pad_settle(void);
+static void wait_ack(void);
 static int prompt_again(void);
 static void app_exit(void);
 
@@ -1087,7 +1103,8 @@ static int main_menu(void) {
         printf("   %s Remap a controller\n", sel == 0 ? ">" : " ");
         printf("   %s Live input viewer\n", sel == 1 ? ">" : " ");
         printf("   %s Debug log\n", sel == 2 ? ">" : " ");
-        printf("   %s Update firmware\n", sel == 3 ? ">" : " ");
+        printf("   %s Firmware slots\n", sel == 3 ? ">" : " ");
+        printf("   %s Update firmware\n", sel == 4 ? ">" : " ");
         printf("\n  D-pad to choose, A to select, START to exit.\n");
 
         do {
@@ -1099,10 +1116,10 @@ static int main_menu(void) {
             app_exit();
         }
         if (down & PAD_BUTTON_UP) {
-            sel = (sel + 3) % 4;
+            sel = (sel + 4) % 5;
         }
         if (down & PAD_BUTTON_DOWN) {
-            sel = (sel + 1) % 4;
+            sel = (sel + 1) % 5;
         }
         if (down & PAD_BUTTON_A) {
             printf("\x1b[2J\x1b[1;1H");
@@ -1408,6 +1425,188 @@ static void app_exit(void) {
     exit(0);
 }
 
+/* ------------------------------------------------------------------ *
+ * Firmware slots
+ * ------------------------------------------------------------------ */
+
+static const char *slot_name[GC_BOOT_SLOT_CNT] = { "Factory", "Slot A ", "Slot B " };
+
+static int boot_info(int chan, u8 *running, u8 *next, u8 *mask, u8 *state) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+
+    req[0] = GC_BOOT_INFO_CMD;
+    memset(in, 0, sizeof(in));
+
+    if (si_xfer(chan, req, 1, in, GC_BOOT_INFO_LEN) < 0) {
+        return -1;
+    }
+    if (in[0] != GC_BOOT_PROTO_VER) {
+        return -1;
+    }
+
+    *running = in[1];
+    *next = in[2];
+    *mask = in[3];
+    *state = in[4];
+    return 0;
+}
+
+static int boot_version(int chan, u8 slot, char *out) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+    int chunk;
+
+    memset(out, 0, GC_BOOT_VER_LEN + 1);
+
+    for (chunk = 0; chunk < GC_BOOT_VER_LEN / GC_BOOT_VER_CHUNK; chunk++) {
+        req[0] = GC_BOOT_VER_CMD;
+        req[1] = slot;
+        req[2] = (u8)chunk;
+        memset(in, 0, sizeof(in));
+
+        if (si_xfer(chan, req, 3, in, GC_BOOT_VER_CHUNK) < 0) {
+            return -1;
+        }
+        memcpy(out + chunk * GC_BOOT_VER_CHUNK, in, GC_BOOT_VER_CHUNK);
+    }
+    out[GC_BOOT_VER_LEN] = 0;
+    return 0;
+}
+
+static int boot_select(int chan, u8 slot) {
+    static u8 out[32] ATTRIBUTE_ALIGN(32);
+
+    out[0] = GC_BOOT_SEL_CMD;
+    out[1] = slot;
+
+    return si_xfer(chan, out, 2, NULL, 0);
+}
+
+/* Same bus discipline as the log screen: grab it for the transfers, hand it
+ * straight back so the pad keeps working. */
+static int boot_read_all(int chan, u8 *running, u8 *next, u8 *mask, u8 *state,
+                          char ver[GC_BOOT_SLOT_CNT][GC_BOOT_VER_LEN + 1]) {
+    int ret, i;
+
+    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+
+    ret = boot_info(chan, running, next, mask, state);
+    if (ret == 0) {
+        for (i = 0; i < GC_BOOT_SLOT_CNT; i++) {
+            if (*mask & (1 << i)) {
+                if (boot_version(chan, (u8)i, ver[i]) < 0) {
+                    snprintf(ver[i], GC_BOOT_VER_LEN + 1, "%s", "(unreadable)");
+                }
+            }
+            else {
+                snprintf(ver[i], GC_BOOT_VER_LEN + 1, "%s", "-- empty --");
+            }
+        }
+    }
+
+    pad_settle();
+    return ret;
+}
+
+static void firmware_slots_menu(void) {
+    char ver[GC_BOOT_SLOT_CNT][GC_BOOT_VER_LEN + 1];
+    u8 running = 0, next = 0, mask = 0, state = 0;
+    int chan, sel = 0, i, tries;
+
+    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    chan = ota_find_adapter();
+    pad_settle();
+
+    if (chan < 0) {
+        printf("\nNo BlueRetro adapter answered on any port.\n");
+        wait_ack();
+        return;
+    }
+
+    for (;;) {
+        u16 down;
+
+        /* Tolerant of a few failures: selecting a slot restarts the adapter,
+         * so the link is legitimately absent for a moment afterwards. */
+        for (tries = 0; tries < 10; tries++) {
+            if (boot_read_all(chan, &running, &next, &mask, &state, ver) == 0) {
+                break;
+            }
+            VIDEO_WaitVSync();
+        }
+        if (tries == 10) {
+            printf("\nThis firmware has no slot support.\n");
+            printf("Rebuild with CONFIG_BLUERETRO_GC_BOOT.\n");
+            wait_ack();
+            return;
+        }
+
+        printf("\x1b[2J\x1b[1;1H");
+        printf("BlueRetro Companion - firmware slots\n");
+        printf("====================================\n\n");
+        printf("  Adapter on port %d\n\n", chan + 1);
+
+        for (i = 0; i < GC_BOOT_SLOT_CNT; i++) {
+            printf("   %s %s %-24s%s%s\n",
+                sel == i ? ">" : " ", slot_name[i], ver[i],
+                (running == i) ? " [running]" : "",
+                (next == i && running != i) ? " [boots next]" : "");
+        }
+        printf("   %s Back\n", sel == GC_BOOT_SLOT_CNT ? ">" : " ");
+
+        printf("\n  A boots the highlighted slot. The adapter restarts,\n");
+        printf("  so your controllers drop for a moment.\n");
+        printf("\n  Factory is the image the adapter shipped with and is\n");
+        printf("  never overwritten, so it is always somewhere to go back to.\n");
+
+        do {
+            down = pad_any_down();
+            VIDEO_WaitVSync();
+        } while (!down);
+
+        if (down & PAD_BUTTON_UP) {
+            sel = (sel + GC_BOOT_SLOT_CNT) % (GC_BOOT_SLOT_CNT + 1);
+        }
+        if (down & PAD_BUTTON_DOWN) {
+            sel = (sel + 1) % (GC_BOOT_SLOT_CNT + 1);
+        }
+        if (down & PAD_BUTTON_B) {
+            return;
+        }
+        if (!(down & PAD_BUTTON_A)) {
+            continue;
+        }
+        if (sel == GC_BOOT_SLOT_CNT) {
+            return;
+        }
+
+        if (!(mask & (1 << sel))) {
+            printf("\nThat slot is empty.\n");
+            wait_ack();
+            continue;
+        }
+        if (running == sel) {
+            printf("\nThat slot is already running.\n");
+            wait_ack();
+            continue;
+        }
+
+        SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+        boot_select(chan, (u8)sel);
+        pad_settle();
+
+        printf("\x1b[2J\x1b[1;1H");
+        printf("Booting %s. The adapter is restarting.\n", slot_name[sel]);
+
+        /* Give it long enough to actually go away and come back before the
+         * loop above starts polling again. */
+        for (i = 0; i < 180; i++) {
+            VIDEO_WaitVSync();
+        }
+    }
+}
+
 static void wait_exit(void) {
     printf("\nPress START to exit.\n");
     for (;;) {
@@ -1449,6 +1648,10 @@ int main(int argc, char **argv) {
         }
         else if (choice == 2) {
             debug_log_menu();
+            wait_exit();
+        }
+        else if (choice == 3) {
+            firmware_slots_menu();
             wait_exit();
         }
         /* Anything else falls through to the firmware update below. Both of the

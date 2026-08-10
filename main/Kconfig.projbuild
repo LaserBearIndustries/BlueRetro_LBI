@@ -58,6 +58,19 @@ menu "BlueRetro"
             flushed a kilobyte at a time; the status opcode reports busy while
             flash is being written so the console knows to wait. Prototype.
 
+    config BLUERETRO_GC_BOOT
+        bool "Pick the firmware slot from the GameCube port"
+        default n
+        help
+            Adds vendor SI opcodes 0x27 to 0x29, which report what is
+            installed in the factory and both OTA slots and let one be
+            selected to boot next.
+
+            The updater alternates between the two OTA slots, so the
+            firmware from before the last update is still intact, and the
+            factory image behind it has never been written. This turns a
+            bad update into a menu entry. Prototype.
+
     config BLUERETRO_GC_LOG
         bool "Download the Bluetooth debug log over the GameCube port"
         default n

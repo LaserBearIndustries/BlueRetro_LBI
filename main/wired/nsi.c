@@ -19,6 +19,7 @@
 #include "adapter/memory_card.h"
 #include "adapter/wired/n64.h"
 #include "adapter/wired/gc.h"
+#include "system/gc_boot.h"
 #include "system/gc_log.h"
 #include "system/gpio.h"
 #include "system/intr.h"
@@ -65,6 +66,11 @@
 #define GC_LOG_CMD 0x24
 #define GC_LOG_STATUS_CMD 0x25
 #define GC_LOG_READ_CMD 0x26
+
+/* Firmware slots: what is installed where, and which one boots next. */
+#define GC_BOOT_INFO_CMD 0x27
+#define GC_BOOT_VER_CMD 0x28
+#define GC_BOOT_SEL_CMD 0x29
 
 #define RMT_MEM_ITEM_NUM SOC_RMT_MEM_WORDS_PER_CHANNEL
 
@@ -350,6 +356,41 @@ static void nsi_log_read_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
 }
 #endif
 
+#ifdef CONFIG_BLUERETRO_GC_BOOT
+static void nsi_boot_info_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    uint8_t crc;
+
+    gc_boot_info(buf);
+    nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, GC_BOOT_INFO_LEN, &crc, STOP_BIT_2US);
+    RMT.conf_ch[channel].conf1.tx_start = 1;
+}
+
+static void nsi_boot_version_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    uint8_t crc;
+    uint8_t slot, chunk;
+
+    /* Two payload bytes: which slot, and which slice of its version. */
+    nsi_items_to_bytes(item, buf, 2);
+    slot = buf[0];
+    chunk = buf[1];
+
+    gc_boot_version(slot, chunk, buf);
+    nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, GC_BOOT_VER_CHUNK, &crc, STOP_BIT_2US);
+    RMT.conf_ch[channel].conf1.tx_start = 1;
+}
+
+/* Write only: the result comes back on the info poll. */
+static void nsi_boot_select_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    item = nsi_items_to_bytes(item, buf, 1);
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 1;
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 0;
+    RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_HW;
+    RMT.conf_ch[channel].conf1.rx_en = 1;
+
+    gc_boot_select(buf);
+}
+#endif
+
 static void nsi_ota_version_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     uint8_t crc;
     uint8_t chunk;
@@ -567,6 +608,17 @@ static void gc_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
             nsi_log_read_hdlr(channel, port, item);
             break;
 #endif
+#ifdef CONFIG_BLUERETRO_GC_BOOT
+        case GC_BOOT_INFO_CMD:
+            nsi_boot_info_hdlr(channel, port, item);
+            break;
+        case GC_BOOT_VER_CMD:
+            nsi_boot_version_hdlr(channel, port, item);
+            break;
+        case GC_BOOT_SEL_CMD:
+            nsi_boot_select_hdlr(channel, port, item);
+            break;
+#endif
         case 0x00:
         case 0xFF:
             nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, gc_kb_ident, sizeof(gc_kb_ident), &crc, STOP_BIT_2US);
@@ -627,6 +679,17 @@ static void gc_pad_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
             break;
         case GC_LOG_READ_CMD:
             nsi_log_read_hdlr(channel, port, item);
+            break;
+#endif
+#ifdef CONFIG_BLUERETRO_GC_BOOT
+        case GC_BOOT_INFO_CMD:
+            nsi_boot_info_hdlr(channel, port, item);
+            break;
+        case GC_BOOT_VER_CMD:
+            nsi_boot_version_hdlr(channel, port, item);
+            break;
+        case GC_BOOT_SEL_CMD:
+            nsi_boot_select_hdlr(channel, port, item);
             break;
 #endif
         case 0x00:
