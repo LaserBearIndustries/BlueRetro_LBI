@@ -952,27 +952,65 @@ static void log_download(int chan, u32 len) {
     printf("\nDone. Copy %s off the card and send it over.\n", LOG_PATH);
 }
 
-static void debug_log_menu(void) {
-    int chan, sel = 0;
+/* Hold a message on screen until the user acknowledges it. Without this the
+ * menu redraw wipes it within a frame or two. Assumes polling is already on. */
+static void wait_ack(void) {
+    printf("\nPress A to continue.\n");
+    while (!(pad_any_down() & (PAD_BUTTON_A | PAD_BUTTON_B))) {
+        VIDEO_WaitVSync();
+    }
+}
+
+/* The GameCube pad and our manual transfers cannot share the bus. libogc's PAD
+ * driver only refreshes while SI polling runs, and polling fights SI_Transfer,
+ * so every adapter access has to grab the bus and hand it straight back. That
+ * is what pad_settle() is for, and its twenty frames also swallow the button
+ * edge that selected the action, which would otherwise be read again by the
+ * menu below and fire whatever the cursor had landed on.
+ *
+ * This screen is the only one that drives the GameCube pad rather than the
+ * Bluetooth one, so it is the only one that has to do this per operation. */
+static int log_bus_op(int chan, int op, u8 *bank, u8 *state, u32 *len) {
+    int ret;
 
     SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
 
+    if (op < 0) {
+        ret = log_status(chan, bank, state, len);
+    }
+    else {
+        ret = log_send(chan, (u8)op);
+        if (ret == 0) {
+            ret = log_wait_idle(chan);
+        }
+    }
+
+    pad_settle();
+    return ret;
+}
+
+static void debug_log_menu(void) {
+    u8 bank = 0, state = 0;
+    u32 len = 0;
+    int chan, sel = 0;
+
+    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
     chan = ota_find_adapter();
+    pad_settle();
+
     if (chan < 0) {
         printf("\nNo BlueRetro adapter answered on any port.\n");
-        pad_settle();
+        wait_ack();
         return;
     }
 
     for (;;) {
-        u8 bank = 0, state = 0;
-        u32 len = 0;
         u16 down;
 
-        if (log_status(chan, &bank, &state, &len) < 0) {
+        if (log_bus_op(chan, -1, &bank, &state, &len) < 0) {
             printf("\nThis firmware has no debug log support.\n");
             printf("Rebuild with CONFIG_BLUERETRO_GC_LOG.\n");
-            pad_settle();
+            wait_ack();
             return;
         }
 
@@ -986,9 +1024,11 @@ static void debug_log_menu(void) {
         printf("   %s Stop capturing\n", sel == 1 ? ">" : " ");
         printf("   %s Save log to SD card\n", sel == 2 ? ">" : " ");
         printf("   %s Back\n", sel == 3 ? ">" : " ");
+        printf("\n  D-pad to choose, A to select, B to go back.\n");
         printf("\n  Capture survives a reboot, so start one, reproduce the\n");
         printf("  fault, then come back here and save.\n");
 
+        /* Polling is on here, courtesy of the pad_settle() in log_bus_op(). */
         do {
             down = pad_any_down();
             VIDEO_WaitVSync();
@@ -1011,22 +1051,22 @@ static void debug_log_menu(void) {
             case 0:
                 /* Enabling rewinds on the adapter side, so this always
                  * starts from an empty buffer. */
-                log_send(chan, GC_LOG_SUB_BANK_ON);
-                if (log_wait_idle(chan) < 0) {
+                if (log_bus_op(chan, GC_LOG_SUB_BANK_ON, &bank, &state, &len) < 0) {
                     printf("\nCould not enable capture.\n");
-                    pad_settle();
+                    wait_ack();
                 }
                 break;
             case 1:
-                log_send(chan, GC_LOG_SUB_BANK_OFF);
-                if (log_wait_idle(chan) < 0) {
+                if (log_bus_op(chan, GC_LOG_SUB_BANK_OFF, &bank, &state, &len) < 0) {
                     printf("\nCould not disable capture.\n");
-                    pad_settle();
+                    wait_ack();
                 }
                 break;
             case 2:
+                SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
                 log_download(chan, len);
                 pad_settle();
+                wait_ack();
                 break;
             default:
                 return;
