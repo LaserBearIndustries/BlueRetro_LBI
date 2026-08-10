@@ -45,6 +45,14 @@ static volatile uint8_t app_req = GC_APP_REQ_NONE;
 /* Port whose output is held neutral for capture, or GC_APP_NO_DEV for none. */
 static volatile uint8_t mute_port = GC_APP_NO_DEV;
 
+/* Task loops since the app last said anything, at 10ms each. A mute that
+ * outlives the app leaves that port presenting a controller which is connected
+ * and permanently idle, and there is no way to press anything to fix it,
+ * because the pad you would press is the one being held. Only the app can lift
+ * it, so if the app has gone, lift it here. */
+#define GC_APP_MUTE_TIMEOUT_TICKS (30 * 100)
+static volatile uint32_t mute_ticks = 0;
+
 /* Generic axis indices, in the order the app expects them. */
 static const uint8_t gc_app_axis_idx[GC_APP_AXIS_CNT] = {
     AXIS_LX, AXIS_LY, AXIS_RX, AXIS_RY, TRIG_L, TRIG_R,
@@ -107,6 +115,12 @@ uint32_t gc_app_is_muted(uint8_t out_idx) {
 }
 
 void IRAM_ATTR gc_app_input_read(uint8_t *out) {
+    /* The poll the app runs every frame while it has the bus, so this and not
+     * the mode command is what tells us it is still there. Capture legitimately
+     * holds the mute for minutes at a time, waiting on someone to press
+     * buttons, and only sends a mode command at either end of that. */
+    mute_ticks = 0;
+
     for (uint32_t i = 0; i < GC_APP_INPUT_LEN; i++) {
         out[i] = input_snap[i];
     }
@@ -170,6 +184,9 @@ void IRAM_ATTR gc_app_map_cmd(const uint8_t *payload) {
 }
 
 void IRAM_ATTR gc_app_mode_cmd(const uint8_t *payload) {
+    /* Any command at all is proof the app is still running. */
+    mute_ticks = 0;
+
     if (payload[0]) {
         if (payload[1] < WIRED_MAX_DEV) {
             mute_port = payload[1];
@@ -246,6 +263,14 @@ static void gc_app_task(void *arg) {
                         (mute_port == GC_APP_NO_DEV) ? "off" : "on");
                     break;
             }
+        }
+
+        if (mute_port != GC_APP_NO_DEV && ++mute_ticks > GC_APP_MUTE_TIMEOUT_TICKS) {
+            printf("# %s: app went quiet, releasing port %u\n", __FUNCTION__,
+                mute_port);
+            mute_port = GC_APP_NO_DEV;
+            mute_ticks = 0;
+            app_req = GC_APP_REQ_MUTE;
         }
 
         /* Cheap, and it means the ISR never has to reach into flash mapped

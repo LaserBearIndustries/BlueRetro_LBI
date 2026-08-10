@@ -975,6 +975,16 @@ static int mapping_wizard(void) {
             cnt++;
         }
 
+        /* Capture mute off before anything asks for a button press. It holds
+         * the mapped controller's port neutral, and that controller is normally
+         * the only one connected, so a menu drawn while it is still muted
+         * cannot be answered on the very pad that was just configured.
+         *
+         * It also makes the port look like an idle controller rather than an
+         * absent one, so leaving it on reads as a pad that is connected but
+         * does nothing, which survives unplugging and reconnecting it. */
+        app_mode_send(chan, 0, (u8)port);
+
         if (cnt) {
             /* Off the bus before touching the card, and the names have to be in
              * hand before the menu can draw. */
@@ -998,7 +1008,6 @@ static int mapping_wizard(void) {
         usleep(10000);
     }
 
-    app_mode_send(chan, 0, (u8)port);
     pad_settle();
 
     printf("\x1b[2J\x1b[1;1H");
