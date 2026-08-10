@@ -1509,10 +1509,57 @@ static int boot_read_all(int chan, u8 *running, u8 *next, u8 *mask, u8 *state,
     return ret;
 }
 
+/* The boot choice is persistent: it lives in the OTA data partition, and
+ * picking the factory image works by erasing that, after which the
+ * bootloader falls back to factory on every boot. A power cycle does not
+ * undo it. So if the slot being selected holds firmware without these
+ * opcodes, this app cannot bring you back, and that is worth spelling out
+ * rather than discovering. Hence a hold rather than a tap. */
+static int boot_confirm(int slot, const char *ver) {
+    int a = 0, b = 0;
+
+    printf("\x1b[2J\x1b[1;1H");
+    printf("Boot %s?\n", slot_name[slot]);
+    printf("=============\n\n");
+    printf("  %s\n\n", ver);
+    printf("  This sticks. The boot slot is stored in flash, so a\n");
+    printf("  power cycle will not undo it.\n\n");
+    printf("  If that firmware predates this app, you cannot come\n");
+    printf("  back from this screen. Ways back, best first:\n");
+    printf("    - Update firmware here, if it has the updater\n");
+    printf("    - The Bluetooth web config\n");
+    printf("    - A serial flash\n\n");
+    printf("  Hold A to boot it, B to cancel.\n");
+
+    for (;;) {
+        u16 held = pad_any_held();
+
+        if (held & PAD_BUTTON_A) {
+            if (++a > 60) {
+                return 1;
+            }
+        }
+        else {
+            a = 0;
+        }
+
+        if (held & (PAD_BUTTON_B | PAD_BUTTON_START)) {
+            if (++b > 15) {
+                return 0;
+            }
+        }
+        else {
+            b = 0;
+        }
+        VIDEO_WaitVSync();
+    }
+}
+
 static void firmware_slots_menu(void) {
     char ver[GC_BOOT_SLOT_CNT][GC_BOOT_VER_LEN + 1];
     u8 running = 0, next = 0, mask = 0, state = 0;
-    int chan, sel = 0, i, tries;
+    /* Starts on Back, so a stray A does not boot whatever is first. */
+    int chan, sel = GC_BOOT_SLOT_CNT, i, tries;
 
     SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
     chan = ota_find_adapter();
@@ -1555,10 +1602,11 @@ static void firmware_slots_menu(void) {
         }
         printf("   %s Back\n", sel == GC_BOOT_SLOT_CNT ? ">" : " ");
 
-        printf("\n  A boots the highlighted slot. The adapter restarts,\n");
-        printf("  so your controllers drop for a moment.\n");
-        printf("\n  Factory is the image the adapter shipped with and is\n");
-        printf("  never overwritten, so it is always somewhere to go back to.\n");
+        printf("\n  A boots the highlighted slot. The adapter restarts.\n");
+        printf("  The choice sticks: a power cycle will not undo it.\n");
+        printf("\n  Factory is whatever was last flashed over serial and\n");
+        printf("  is never touched by an update. Check its version above\n");
+        printf("  before going there, since older builds cannot come back.\n");
 
         do {
             down = pad_any_down();
@@ -1589,6 +1637,9 @@ static void firmware_slots_menu(void) {
         if (running == sel) {
             printf("\nThat slot is already running.\n");
             wait_ack();
+            continue;
+        }
+        if (!boot_confirm(sel, ver[sel])) {
             continue;
         }
 
