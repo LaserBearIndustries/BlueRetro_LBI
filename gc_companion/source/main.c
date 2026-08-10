@@ -159,6 +159,7 @@ static volatile u32 si_done = 0;
 
 static u16 pad_any_down(void);
 static u16 pad_any_held(void);
+static void si_grab(void);
 static void pad_settle(void);
 static void pad_reattach(void);
 static void wait_ack(void);
@@ -172,22 +173,43 @@ static void si_cb(s32 chan, u32 type) {
 }
 
 /* libogc drives SI asynchronously. This protocol is strictly request then
- * response, so wrap it back into a blocking call with a timeout. */
+ * response, so wrap it back into a blocking call with a timeout.
+ *
+ * SI_Transfer() refuses outright, returning zero, while a packet is already
+ * queued on the channel. libogc queues its own whenever it is probing pads,
+ * which it does for several seconds after the adapter restarts and its ports
+ * come back. Treating that as an error made a busy bus indistinguishable
+ * from an adapter that does not implement the opcode. It is neither: it is
+ * a wait. */
 static int si_xfer(int chan, void *out, u32 out_len, void *in, u32 in_len) {
-    u64 start;
+    u64 start = gettime();
 
     si_done = 0;
-    if (!SI_Transfer(chan, out, out_len, in, in_len, si_cb, 0)) {
-        return -1;
-    }
-
-    start = gettime();
-    while (!si_done) {
+    while (!SI_Transfer(chan, out, out_len, in, in_len, si_cb, 0)) {
         if (ticks_to_millisecs(diff_ticks(start, gettime())) > SI_TIMEOUT_MS) {
             return -1;
         }
     }
+
+    while (!si_done) {
+        if (ticks_to_millisecs(diff_ticks(start, gettime())) > SI_TIMEOUT_MS * 2) {
+            return -1;
+        }
+    }
     return 0;
+}
+
+/* Take the bus off libogc. Disabling polling is not enough on its own: a pad
+ * probe already in flight keeps its packet queued, and PAD_Sync() is how you
+ * ask whether it has finished. Skipping this wait is what made a slot swap
+ * look like firmware without slot support. */
+static void si_grab(void) {
+    int i;
+
+    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    for (i = 0; i < 300 && !PAD_Sync(); i++) {
+        VIDEO_WaitVSync();
+    }
 }
 
 static int ota_status(int chan, u8 *state, u8 *seq, u8 *ver) {
@@ -396,7 +418,7 @@ static void input_viewer(void) {
     int chan, i, held = 0;
 
     memset(axes, 0, sizeof(axes));
-    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    si_grab();
 
     chan = ota_find_adapter();
     if (chan < 0) {
@@ -677,7 +699,7 @@ static int mapping_wizard(void) {
     }
     total = CAPTURE_STEP_CNT + ((trig_mode == TRIG_SEPARATE) ? 2 : 0);
 
-    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    si_grab();
 
     chan = ota_find_adapter();
     if (chan < 0) {
@@ -973,8 +995,17 @@ static void log_download(int chan, u32 len) {
 /* Hold a message on screen until the user acknowledges it. Without this the
  * menu redraw wipes it within a frame or two. Assumes polling is already on. */
 static void wait_ack(void) {
-    printf("\nPress A to continue.\n");
-    while (!(pad_any_down() & (PAD_BUTTON_A | PAD_BUTTON_B))) {
+    int i;
+
+    printf("\nPress any button to continue.\n");
+
+    /* Any button, and a timeout behind that. Twice now a screen has been
+     * escapable only by a pad that had stopped being polled, and a message
+     * you cannot dismiss is a power cycle. */
+    for (i = 0; i < 60 * 30; i++) {
+        if (pad_any_down()) {
+            return;
+        }
         VIDEO_WaitVSync();
     }
 }
@@ -991,7 +1022,7 @@ static void wait_ack(void) {
 static int log_bus_op(int chan, int op, u8 *bank, u8 *state, u32 *len) {
     int ret;
 
-    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    si_grab();
 
     if (op < 0) {
         ret = log_status(chan, bank, state, len);
@@ -1012,7 +1043,7 @@ static void debug_log_menu(void) {
     u32 len = 0;
     int chan, sel = 0;
 
-    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    si_grab();
     chan = ota_find_adapter();
     pad_settle();
 
@@ -1081,7 +1112,7 @@ static void debug_log_menu(void) {
                 }
                 break;
             case 2:
-                SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+                si_grab();
                 log_download(chan, len);
                 pad_settle();
                 wait_ack();
@@ -1515,7 +1546,7 @@ static int boot_read_all(int chan, u8 *running, u8 *next, u8 *mask, u8 *state,
                           char ver[GC_BOOT_SLOT_CNT][GC_BOOT_VER_LEN + 1]) {
     int ret, i;
 
-    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    si_grab();
 
     ret = boot_info(chan, running, next, mask, state);
     if (ret == 0) {
@@ -1587,7 +1618,7 @@ static void firmware_slots_menu(void) {
     /* Starts on Back, so a stray A does not boot whatever is first. */
     int chan, sel = GC_BOOT_SLOT_CNT, i, tries;
 
-    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    si_grab();
     chan = ota_find_adapter();
     pad_settle();
 
@@ -1669,7 +1700,7 @@ static void firmware_slots_menu(void) {
             continue;
         }
 
-        SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+        si_grab();
         boot_select(chan, (u8)sel);
         pad_settle();
 
@@ -1758,7 +1789,7 @@ int main(int argc, char **argv) {
 
     /* libogc's PAD driver keeps SI auto polling running, which fights manual
      * transfers. Hand the bus over for the duration of the update. */
-    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+    si_grab();
 
     chan = ota_find_adapter();
     if (chan < 0) {
@@ -1812,7 +1843,7 @@ int main(int argc, char **argv) {
             VIDEO_WaitVSync();
         }
 
-        SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+        si_grab();
     }
 
     printf("\nDo NOT power off until this finishes.\n\n");
