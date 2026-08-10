@@ -26,7 +26,7 @@
  * [0] protocol version
  * [1] state, see below
  * [2..5] config size, little endian
- * [6..7] reserved */
+ * [6..7] first chunk of a restore that never arrived, 0xFFFF if none did */
 #define GC_CFG_INFO_LEN 8
 
 #define GC_CFG_PROTO_VER 1
@@ -45,6 +45,10 @@ enum {
     GC_CFG_ST_BUSY,
     GC_CFG_ST_OK,
     GC_CFG_ST_ERROR,
+    /* Staging buffer cleared and waiting for chunks. Nothing is accepted before
+     * this, because clearing it happens off the interrupt and the first chunk
+     * would otherwise land in a buffer that is about to be wiped. */
+    GC_CFG_ST_READY,
 };
 
 /* All four called straight from the RMT ISR. */

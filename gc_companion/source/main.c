@@ -98,6 +98,7 @@
 #define GC_CFG_ST_BUSY 1
 #define GC_CFG_ST_OK 2
 #define GC_CFG_ST_ERROR 3
+#define GC_CFG_ST_READY 4
 
 #define CFG_PATH "blueretro_config.bin"
 
@@ -1635,7 +1636,7 @@ static void read_adapter_version(void) {
  * Settings backup and restore
  * ------------------------------------------------------------------ */
 
-static int cfg_info(int chan, u8 *state, u32 *size) {
+static int cfg_info(int chan, u8 *state, u32 *size, u16 *missing) {
     static u8 req[32] ATTRIBUTE_ALIGN(32);
     static u8 in[32] ATTRIBUTE_ALIGN(32);
 
@@ -1651,6 +1652,9 @@ static int cfg_info(int chan, u8 *state, u32 *size) {
 
     *state = in[1];
     *size = (u32)in[2] | ((u32)in[3] << 8) | ((u32)in[4] << 16) | ((u32)in[5] << 24);
+    if (missing) {
+        *missing = (u16)in[6] | ((u16)in[7] << 8);
+    }
     return (*size && *size <= CFG_SIZE_MAX) ? 0 : -1;
 }
 
@@ -1746,6 +1750,7 @@ static void cfg_restore(int chan, u32 size) {
     u32 done = 0;
     u8 state = 0;
     u32 reported = 0;
+    u16 missing = 0xFFFF;
     u64 start;
     int last_pct = -1;
 
@@ -1781,6 +1786,24 @@ static void cfg_restore(int chan, u32 size) {
     printf("\nRestoring %lu bytes\n", (unsigned long)size);
     cfg_cmd(chan, GC_CFG_SUB_BEGIN);
 
+    /* Clearing twelve kilobytes happens off the interrupt, so the first
+     * chunk would land in a buffer about to be wiped. Wait to be told the
+     * staging buffer is ready. */
+    start = gettime();
+    for (;;) {
+        if (cfg_info(chan, &state, &reported, NULL) == 0
+                && state == GC_CFG_ST_READY) {
+            break;
+        }
+        if (ticks_to_millisecs(diff_ticks(start, gettime())) > 5000) {
+            printf("\nThe adapter never became ready. Nothing applied.\n");
+            cfg_cmd(chan, GC_CFG_SUB_ABORT);
+            fclose(f);
+            return;
+        }
+        usleep(10000);
+    }
+
     while (done < size) {
         u32 want = size - done;
         int pct;
@@ -1812,7 +1835,7 @@ static void cfg_restore(int chan, u32 size) {
 
     start = gettime();
     while (ticks_to_millisecs(diff_ticks(start, gettime())) < 10000) {
-        if (cfg_info(chan, &state, &reported) == 0
+        if (cfg_info(chan, &state, &reported, &missing) == 0
                 && (state == GC_CFG_ST_OK || state == GC_CFG_ST_ERROR)) {
             break;
         }
@@ -1821,6 +1844,11 @@ static void cfg_restore(int chan, u32 size) {
 
     if (state == GC_CFG_ST_OK) {
         printf("\nSettings restored. They are live now.\n");
+    }
+    else if (missing != 0xFFFF) {
+        printf("\nChunk %u of %lu never arrived. Nothing changed.\n",
+            missing, (unsigned long)(size / GC_CFG_CHUNK));
+        printf("Worth simply trying again.\n");
     }
     else {
         printf("\nThe adapter rejected it. Nothing changed.\n");
@@ -1834,7 +1862,7 @@ static void settings_menu(void) {
 
     si_grab();
     chan = ota_find_adapter();
-    if (chan >= 0 && cfg_info(chan, &state, &size) < 0) {
+    if (chan >= 0 && cfg_info(chan, &state, &size, NULL) < 0) {
         chan = -1;
     }
     pad_settle();

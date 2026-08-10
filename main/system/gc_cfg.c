@@ -15,12 +15,23 @@
 
 #define GC_CFG_REQ_NONE 0xFF
 
-/* Staged in full before any of it is adopted. A restore that was interrupted
- * partway would otherwise leave the adapter running half of one config and half
- * of another, which is worse than either. */
+#define GC_CFG_CHUNK_CNT \
+    ((sizeof(struct config) + GC_CFG_CHUNK - 1) / GC_CFG_CHUNK)
+#define GC_CFG_BITMAP_LEN ((GC_CFG_CHUNK_CNT + 7) / 8)
+
+/* Staged in full before any of it is adopted. A restore interrupted partway
+ * would otherwise leave the adapter running half of one config and half of
+ * another, which is worse than either. */
 static uint8_t stage[sizeof(struct config)];
+
+/* Which chunks actually arrived. Without this a dropped transaction in the
+ * middle of a restore is silently adopted as a config with a hole in it, and
+ * the hole is wherever the transfer happened to stumble. */
+static uint8_t received[GC_CFG_BITMAP_LEN];
+
 static volatile uint8_t cfg_state = GC_CFG_ST_IDLE;
 static volatile uint8_t cfg_req = GC_CFG_REQ_NONE;
+static volatile uint16_t cfg_missing = 0xFFFF;
 
 void IRAM_ATTR gc_cfg_info(uint8_t *out) {
     uint32_t size = sizeof(struct config);
@@ -31,8 +42,8 @@ void IRAM_ATTR gc_cfg_info(uint8_t *out) {
     out[3] = (uint8_t)(size >> 8);
     out[4] = (uint8_t)(size >> 16);
     out[5] = (uint8_t)(size >> 24);
-    out[6] = 0;
-    out[7] = 0;
+    out[6] = (uint8_t)cfg_missing;
+    out[7] = (uint8_t)(cfg_missing >> 8);
 }
 
 void IRAM_ATTR gc_cfg_read(uint16_t chunk, uint8_t *out) {
@@ -52,7 +63,7 @@ void IRAM_ATTR gc_cfg_write(const uint8_t *payload) {
     uint32_t addr = chunk * GC_CFG_CHUNK;
     uint32_t i;
 
-    if (cfg_state != GC_CFG_ST_BUSY) {
+    if (cfg_state != GC_CFG_ST_READY || chunk >= GC_CFG_CHUNK_CNT) {
         return;
     }
 
@@ -61,18 +72,19 @@ void IRAM_ATTR gc_cfg_write(const uint8_t *payload) {
             stage[addr + i] = payload[2 + i];
         }
     }
+    received[chunk >> 3] |= (uint8_t)(1 << (chunk & 7));
 }
 
 void IRAM_ATTR gc_cfg_cmd(const uint8_t *payload) {
     switch (payload[0]) {
         case GC_CFG_SUB_BEGIN:
-            memset(stage, 0, sizeof(stage));
-            cfg_state = GC_CFG_ST_BUSY;
-            break;
         case GC_CFG_SUB_APPLY:
-            if (cfg_state == GC_CFG_ST_BUSY) {
-                cfg_req = GC_CFG_SUB_APPLY;
-            }
+            /* Both handed to the task. Clearing the staging buffer is twelve
+             * kilobytes of memset, which is far too much to do here: this runs
+             * in the RMT interrupt, and overrunning it costs the very next SI
+             * transaction, which is the first chunk of the transfer. */
+            cfg_state = GC_CFG_ST_BUSY;
+            cfg_req = payload[0];
             break;
         case GC_CFG_SUB_ABORT:
             cfg_state = GC_CFG_ST_IDLE;
@@ -80,9 +92,27 @@ void IRAM_ATTR gc_cfg_cmd(const uint8_t *payload) {
     }
 }
 
+/* Returns the first chunk that never arrived, or 0xFFFF if none did. */
+static uint16_t gc_cfg_first_missing(void) {
+    uint32_t i;
+
+    for (i = 0; i < GC_CFG_CHUNK_CNT; i++) {
+        if (!(received[i >> 3] & (1 << (i & 7)))) {
+            return (uint16_t)i;
+        }
+    }
+    return 0xFFFF;
+}
+
 static uint32_t gc_cfg_staged_is_sane(void) {
     const struct config *in = (const struct config *)stage;
     uint32_t i;
+
+    cfg_missing = gc_cfg_first_missing();
+    if (cfg_missing != 0xFFFF) {
+        printf("# %s: chunk %u never arrived\n", __FUNCTION__, cfg_missing);
+        return 0;
+    }
 
     /* Refused rather than migrated. The version update path in config.c works
      * on a file it can rewrite in place, and an adapter is a poor place to
@@ -110,7 +140,15 @@ static void gc_cfg_task(void *arg) {
         if (req != GC_CFG_REQ_NONE) {
             cfg_req = GC_CFG_REQ_NONE;
 
-            if (gc_cfg_staged_is_sane()) {
+            if (req == GC_CFG_SUB_BEGIN) {
+                memset(stage, 0, sizeof(stage));
+                memset(received, 0, sizeof(received));
+                cfg_missing = 0xFFFF;
+                cfg_state = GC_CFG_ST_READY;
+                printf("# %s: staging %u chunks\n", __FUNCTION__,
+                    (unsigned)GC_CFG_CHUNK_CNT);
+            }
+            else if (gc_cfg_staged_is_sane()) {
                 memcpy(&config, stage, sizeof(config));
                 config_update(DEFAULT_CFG);
 
