@@ -83,6 +83,29 @@
 #define PROFILE_MAX 16
 #define MAP_MAX 64
 
+/* Settings to and from the card. */
+#define GC_CFG_INFO_CMD 0x2B
+#define GC_CFG_READ_CMD 0x2C
+#define GC_CFG_WRITE_CMD 0x2D
+#define GC_CFG_CMD 0x2E
+#define GC_CFG_CHUNK 8
+#define GC_CFG_INFO_LEN 8
+#define GC_CFG_PROTO_VER 1
+#define GC_CFG_SUB_BEGIN 0
+#define GC_CFG_SUB_APPLY 1
+#define GC_CFG_SUB_ABORT 2
+#define GC_CFG_ST_IDLE 0
+#define GC_CFG_ST_BUSY 1
+#define GC_CFG_ST_OK 2
+#define GC_CFG_ST_ERROR 3
+
+#define CFG_PATH "blueretro_config.bin"
+
+/* Refuses anything bigger rather than trusting the adapter's number. The
+ * transfer is driven from it, and a corrupt reply should not turn into a
+ * loop of a hundred thousand transactions. */
+#define CFG_SIZE_MAX 65536
+
 /* Debug log download. */
 #define GC_LOG_CMD 0x24
 #define GC_LOG_STATUS_CMD 0x25
@@ -1608,6 +1631,272 @@ static void read_adapter_version(void) {
     pad_settle();
 }
 
+/* ------------------------------------------------------------------ *
+ * Settings backup and restore
+ * ------------------------------------------------------------------ */
+
+static int cfg_info(int chan, u8 *state, u32 *size) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+
+    req[0] = GC_CFG_INFO_CMD;
+    memset(in, 0, sizeof(in));
+
+    if (si_xfer(chan, req, 1, in, GC_CFG_INFO_LEN) < 0) {
+        return -1;
+    }
+    if (in[0] != GC_CFG_PROTO_VER) {
+        return -1;
+    }
+
+    *state = in[1];
+    *size = (u32)in[2] | ((u32)in[3] << 8) | ((u32)in[4] << 16) | ((u32)in[5] << 24);
+    return (*size && *size <= CFG_SIZE_MAX) ? 0 : -1;
+}
+
+static int cfg_read(int chan, u16 chunk, u8 *out8) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+
+    req[0] = GC_CFG_READ_CMD;
+    req[1] = (u8)chunk;
+    req[2] = (u8)(chunk >> 8);
+    memset(in, 0, sizeof(in));
+
+    if (si_xfer(chan, req, 3, in, GC_CFG_CHUNK) < 0) {
+        return -1;
+    }
+    memcpy(out8, in, GC_CFG_CHUNK);
+    return 0;
+}
+
+static int cfg_write(int chan, u16 chunk, const u8 *data) {
+    static u8 out[32] ATTRIBUTE_ALIGN(32);
+
+    out[0] = GC_CFG_WRITE_CMD;
+    out[1] = (u8)chunk;
+    out[2] = (u8)(chunk >> 8);
+    memcpy(&out[3], data, GC_CFG_CHUNK);
+
+    return si_xfer(chan, out, 3 + GC_CFG_CHUNK, NULL, 0);
+}
+
+static int cfg_cmd(int chan, u8 sub) {
+    static u8 out[32] ATTRIBUTE_ALIGN(32);
+
+    out[0] = GC_CFG_CMD;
+    out[1] = sub;
+
+    return si_xfer(chan, out, 2, NULL, 0);
+}
+
+static void cfg_backup(int chan, u32 size) {
+    u8 buf[GC_CFG_CHUNK];
+    FILE *f;
+    u32 done = 0;
+    int last_pct = -1;
+
+    if (!fat_ready()) {
+        printf("\nNo FAT device. Need an SD Gecko or SD2SP2.\n");
+        return;
+    }
+
+    f = fopen(CFG_PATH, "wb");
+    if (!f) {
+        f = fopen("sd:/" CFG_PATH, "wb");
+    }
+    if (!f) {
+        printf("\nCould not open %s for writing.\n", CFG_PATH);
+        return;
+    }
+
+    printf("\nSaving %lu bytes to %s\n", (unsigned long)size, CFG_PATH);
+
+    while (done < size) {
+        u32 want = size - done;
+        int pct;
+
+        if (want > GC_CFG_CHUNK) {
+            want = GC_CFG_CHUNK;
+        }
+
+        if (cfg_read(chan, (u16)(done / GC_CFG_CHUNK), buf) < 0
+                || fwrite(buf, 1, want, f) != want) {
+            printf("\nFailed at %lu bytes.\n", (unsigned long)done);
+            fclose(f);
+            return;
+        }
+        done += want;
+
+        pct = (int)((done * 100) / size);
+        if (pct != last_pct) {
+            last_pct = pct;
+            printf("\r  %d%%  ", pct);
+        }
+    }
+
+    fclose(f);
+    printf("\nDone.\n");
+}
+
+static void cfg_restore(int chan, u32 size) {
+    u8 buf[GC_CFG_CHUNK];
+    FILE *f;
+    long fsize;
+    u32 done = 0;
+    u8 state = 0;
+    u32 reported = 0;
+    u64 start;
+    int last_pct = -1;
+
+    if (!fat_ready()) {
+        printf("\nNo FAT device. Need an SD Gecko or SD2SP2.\n");
+        return;
+    }
+
+    f = fopen(CFG_PATH, "rb");
+    if (!f) {
+        f = fopen("sd:/" CFG_PATH, "rb");
+    }
+    if (!f) {
+        printf("\nNo %s on the card.\n", CFG_PATH);
+        return;
+    }
+
+    fseek(f, 0, SEEK_END);
+    fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    /* A backup from firmware whose config had a different shape would be read
+     * into the wrong fields entirely, so the size has to agree before any of
+     * it is sent. The adapter checks the magic on top of this. */
+    if (fsize != (long)size) {
+        printf("\n%s is %ld bytes, this firmware wants %lu.\n",
+            CFG_PATH, fsize, (unsigned long)size);
+        printf("It is from a different firmware version. Not restoring.\n");
+        fclose(f);
+        return;
+    }
+
+    printf("\nRestoring %lu bytes\n", (unsigned long)size);
+    cfg_cmd(chan, GC_CFG_SUB_BEGIN);
+
+    while (done < size) {
+        u32 want = size - done;
+        int pct;
+
+        if (want > GC_CFG_CHUNK) {
+            want = GC_CFG_CHUNK;
+        }
+        memset(buf, 0, sizeof(buf));
+
+        if (fread(buf, 1, want, f) != want
+                || cfg_write(chan, (u16)(done / GC_CFG_CHUNK), buf) < 0) {
+            printf("\nFailed at %lu bytes, nothing applied.\n", (unsigned long)done);
+            cfg_cmd(chan, GC_CFG_SUB_ABORT);
+            fclose(f);
+            return;
+        }
+        done += want;
+
+        pct = (int)((done * 100) / size);
+        if (pct != last_pct) {
+            last_pct = pct;
+            printf("\r  %d%%  ", pct);
+        }
+    }
+    fclose(f);
+
+    printf("\nApplying...\n");
+    cfg_cmd(chan, GC_CFG_SUB_APPLY);
+
+    start = gettime();
+    while (ticks_to_millisecs(diff_ticks(start, gettime())) < 10000) {
+        if (cfg_info(chan, &state, &reported) == 0
+                && (state == GC_CFG_ST_OK || state == GC_CFG_ST_ERROR)) {
+            break;
+        }
+        usleep(10000);
+    }
+
+    if (state == GC_CFG_ST_OK) {
+        printf("\nSettings restored. They are live now.\n");
+    }
+    else {
+        printf("\nThe adapter rejected it. Nothing changed.\n");
+    }
+}
+
+static void settings_menu(void) {
+    u8 state = 0;
+    u32 size = 0;
+    int chan, sel = 0;
+
+    si_grab();
+    chan = ota_find_adapter();
+    if (chan >= 0 && cfg_info(chan, &state, &size) < 0) {
+        chan = -1;
+    }
+    pad_settle();
+
+    if (chan < 0) {
+        printf("\nThe adapter is not answering the settings commands.\n");
+        printf("If this firmware predates them, rebuild it with\n");
+        printf("CONFIG_BLUERETRO_GC_CFG.\n");
+        wait_ack();
+        return;
+    }
+
+    for (;;) {
+        u16 down;
+
+        printf("\x1b[2J\x1b[1;1H");
+        printf("Settings backup\n===============\n\n");
+        printf("  Adapter on port %d, %lu bytes of settings\n\n",
+            chan + 1, (unsigned long)size);
+        printf("   %s Save to card\n", sel == 0 ? ">" : " ");
+        printf("   %s Restore from card\n", sel == 1 ? ">" : " ");
+        printf("   %s Back\n", sel == 2 ? ">" : " ");
+        printf("\n  Written to and read from %s.\n", CFG_PATH);
+        printf("\n  This is every setting the web config touches, so one\n");
+        printf("  card can set up a whole batch of adapters the same way.\n");
+        printf("\n  Per controller profiles are not included: they belong\n");
+        printf("  to a pad by its Bluetooth address, so they would mean\n");
+        printf("  nothing on another adapter.\n");
+
+        do {
+            down = pad_any_down();
+            VIDEO_WaitVSync();
+        } while (!down);
+
+        if (down & PAD_BUTTON_UP) {
+            sel = (sel + 2) % 3;
+        }
+        if (down & PAD_BUTTON_DOWN) {
+            sel = (sel + 1) % 3;
+        }
+        if (down & PAD_BUTTON_B) {
+            return;
+        }
+        if (!(down & PAD_BUTTON_A)) {
+            continue;
+        }
+        if (sel == 2) {
+            return;
+        }
+
+        si_grab();
+        if (sel == 0) {
+            cfg_backup(chan, size);
+        }
+        else {
+            cfg_restore(chan, size);
+        }
+        pad_settle();
+        wait_ack();
+    }
+}
+
 static int main_menu(void) {
     int sel = 0;
 
@@ -1623,8 +1912,9 @@ static int main_menu(void) {
         printf("   %s Apply a premade profile\n", sel == 1 ? ">" : " ");
         printf("   %s Live input viewer\n", sel == 2 ? ">" : " ");
         printf("   %s Debug log\n", sel == 3 ? ">" : " ");
-        printf("   %s Firmware slots\n", sel == 4 ? ">" : " ");
-        printf("   %s Update firmware\n", sel == 5 ? ">" : " ");
+        printf("   %s Settings backup\n", sel == 4 ? ">" : " ");
+        printf("   %s Firmware slots\n", sel == 5 ? ">" : " ");
+        printf("   %s Update firmware\n", sel == 6 ? ">" : " ");
         printf("\n  D-pad to choose, A to select, START to exit.\n");
 
         do {
@@ -1636,10 +1926,10 @@ static int main_menu(void) {
             app_exit();
         }
         if (down & PAD_BUTTON_UP) {
-            sel = (sel + 5) % 6;
+            sel = (sel + 6) % 7;
         }
         if (down & PAD_BUTTON_DOWN) {
-            sel = (sel + 1) % 6;
+            sel = (sel + 1) % 7;
         }
         if (down & PAD_BUTTON_A) {
             printf("\x1b[2J\x1b[1;1H");
@@ -2306,6 +2596,10 @@ int main(int argc, char **argv) {
             wait_exit();
         }
         else if (choice == 4) {
+            settings_menu();
+            wait_exit();
+        }
+        else if (choice == 5) {
             firmware_slots_menu();
             wait_exit();
         }

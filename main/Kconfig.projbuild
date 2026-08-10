@@ -58,6 +58,19 @@ menu "BlueRetro"
             flushed a kilobyte at a time; the status opcode reports busy while
             flash is being written so the console knows to wait. Prototype.
 
+    config BLUERETRO_GC_CFG
+        bool "Back up and restore settings over the GameCube port"
+        default n
+        help
+            Adds vendor SI opcodes 0x2B to 0x2E, which copy the config
+            blob out to the card and back again.
+
+            Restoring an adapter that lost its filesystem is the obvious
+            use; provisioning a batch of them identically from one card,
+            without driving a browser once per unit, is the one that
+            earns it. Costs a staging buffer the size of the config.
+            Prototype.
+
     config BLUERETRO_GC_BOOT
         bool "Pick the firmware slot from the GameCube port"
         default n

@@ -120,6 +120,12 @@ if(CONFIG_BLUERETRO_GC_BOOT)
     )
 endif()
 
+if(CONFIG_BLUERETRO_GC_CFG)
+    list(APPEND srcs
+        "system/gc_cfg.c"
+    )
+endif()
+
 if(CONFIG_BLUERETRO_COVERAGE)
     list(APPEND srcs
         "tests/coverage.c"
