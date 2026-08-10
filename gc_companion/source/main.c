@@ -170,6 +170,17 @@ static volatile u32 si_done = 0;
 
 static u16 pad_any_down(void);
 static u16 pad_any_held(void);
+/* Mounting is not free and libfat is happy to be asked twice, but callers here
+ * are on screens where a stall is visible, so do it once and remember. */
+static bool fat_ready(void) {
+    static int state = 0;
+
+    if (state == 0) {
+        state = fatInitDefault() ? 1 : -1;
+    }
+    return state > 0;
+}
+
 static void si_grab(void);
 static void pad_settle(void);
 static void pad_reattach(void);
@@ -749,6 +760,14 @@ static void gid_titles(char ids[][GC_APP_GID_LEN + 1],
         snprintf(names[i], GID_TITLE_LEN + 1, "%.*s", GID_TITLE_LEN, ids[i]);
     }
 
+    /* The card is mounted on demand, by whichever screen needs it. Remapping a
+     * controller needs nothing off the card except this, so nothing on the path
+     * here had ever mounted it, and every lookup was failing on the open rather
+     * than on the contents. */
+    if (!fat_ready()) {
+        return;
+    }
+
     f = fopen(GID_TITLES_PATH, "r");
     if (!f) {
         f = fopen("sd:/" GID_TITLES_PATH, "r");
@@ -1129,7 +1148,7 @@ static void log_download(int chan, u32 len) {
 
     /* FAT is only needed here, so it is not mounted until now: the rest of
      * the app runs fine with no card in the slot. */
-    if (!fatInitDefault()) {
+    if (!fat_ready()) {
         printf("\nNo FAT device. Need an SD Gecko or SD2SP2.\n");
         return;
     }
@@ -1613,7 +1632,7 @@ static void dol_chainload(void) {
     long size;
     int i;
 
-    if (!fatInitDefault()) {
+    if (!fat_ready()) {
         return;
     }
 
@@ -2028,7 +2047,7 @@ int main(int argc, char **argv) {
     printf("\n\nBlueRetro Companion - firmware update\n");
     printf("=====================================\n\n");
 
-    if (!fatInitDefault()) {
+    if (!fat_ready()) {
         printf("No FAT device. Need an SD Gecko or SD2SP2.\n");
         wait_exit();
     }
