@@ -32,9 +32,16 @@ DATA		:=	data
 INCLUDES	:=
 
 #---------------------------------------------------------------------------------
+# Same string the firmware stamps into its image, from the same repo, so a
+# support request can name both halves and they can be told apart. Falls back
+# rather than failing when the tree is not a git checkout.
+#---------------------------------------------------------------------------------
+APP_VERSION	:=	$(shell git -C $(CURDIR) describe --always --tags --dirty 2>/dev/null || echo unknown)
+
+#---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
-CFLAGS		= -g -O2 -Wall $(MACHDEP) $(INCLUDE)
+CFLAGS		= -g -O2 -Wall $(MACHDEP) $(INCLUDE) -DAPP_VERSION=\"$(APP_VERSION)\"
 CXXFLAGS	= $(CFLAGS)
 LDFLAGS		= -g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 

@@ -1284,6 +1284,22 @@ static void debug_log_menu(void) {
     }
 }
 
+/* Both halves are shipped and updated separately, so a support request needs
+ * both to be answerable. Read the adapter's once on the way in rather than per
+ * redraw: it is three transactions and it does not change while we sit here. */
+static char adapter_ver[GC_OTA_VER_LEN + 1] = "";
+
+static void read_adapter_version(void) {
+    int chan;
+
+    si_grab();
+    chan = ota_find_adapter();
+    if (chan >= 0 && ota_get_version(chan, adapter_ver) < 0) {
+        adapter_ver[0] = 0;
+    }
+    pad_settle();
+}
+
 static int main_menu(void) {
     int sel = 0;
 
@@ -1293,6 +1309,8 @@ static int main_menu(void) {
         printf("\x1b[2J\x1b[1;1H");
         printf("BlueRetro Companion\n");
         printf("===================\n\n");
+        printf("  app      %s\n", APP_VERSION);
+        printf("  adapter  %s\n\n", adapter_ver[0] ? adapter_ver : "not detected");
         printf("   %s Remap a controller\n", sel == 0 ? ">" : " ");
         printf("   %s Live input viewer\n", sel == 1 ? ">" : " ");
         printf("   %s Debug log\n", sel == 2 ? ">" : " ");
@@ -1951,6 +1969,8 @@ int main(int argc, char **argv) {
 
     video_init();
     PAD_Init();
+
+    read_adapter_version();
 
     /* Neither the viewer nor the wizard needs an SD card, so offer the menu
      * before touching FAT. */
