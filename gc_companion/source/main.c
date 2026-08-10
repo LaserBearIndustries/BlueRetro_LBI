@@ -20,7 +20,6 @@
 #include <gccore.h>
 #include <ogc/lwp_watchdog.h>
 #include <fat.h>
-#include <ctype.h>
 
 /* Must match main/wired/nsi.c and main/system/gc_ota.h in the firmware. */
 #define GC_OTA_CMD 0x1E
@@ -717,48 +716,27 @@ static int app_get_gameid(int chan, int idx, char *out) {
     return 0;
 }
 
-/* GameCube ids arrive hex encoded, so GALE01 reaches us as 47414C453031.
- * Decode it back for display, but only when the whole thing decodes to
- * printable characters: other systems put the id on the wire as text and
- * would be mangled by this. */
-static void gid_readable(const char *raw_id, char *out, int out_len) {
-    int len = strlen(raw_id), i, n = 0;
-
-    snprintf(out, out_len, "%s", raw_id);
-
-    if (len < 2 || (len & 1)) {
-        return;
-    }
-
-    for (i = 0; i + 1 < len && n < out_len - 1; i += 2) {
-        int hi = raw_id[i], lo = raw_id[i + 1], v;
-
-        if (!isxdigit(hi) || !isxdigit(lo)) {
-            return;
-        }
-        v = (int)strtol((char[]){(char)hi, (char)lo, 0}, NULL, 16);
-        if (v == 0) {
-            break;
-        }
-        if (v < 0x20 || v > 0x7E) {
-            return;
-        }
-        out[n++] = (char)v;
-    }
-
-    if (n) {
-        out[n] = 0;
-    }
-}
-
-/* Optional. A plain ID=Title per line file on the card, so the list can be
- * refreshed from the web config's without rebuilding anything. Absent, or
- * missing an entry, and the id stands on its own. */
-static void gid_title(const char *id, char *out, int out_len) {
-    char line[128];
+/* Titles are optional and come off the card rather than being built in, so the
+ * list can be regenerated from BlueRetroWebCfg's gameid.db without rebuilding
+ * anything here.
+ *
+ * Ids are looked up exactly as the adapter reports them. An earlier version
+ * decoded them as hex encoded text, on the assumption a GameCube id was its
+ * disc code. The database says otherwise: they are eight opaque bytes, and of
+ * the three thousand odd GameCube and N64 entries only a handful decode to
+ * anything printable, every one of them by accident.
+ *
+ * One pass resolves every id, because the file runs past a hundred kilobytes
+ * and reopening it per id would mean scanning all of it four times over. */
+static void gid_titles(char ids[][GC_APP_GID_LEN + 1],
+        char names[][GID_TITLE_LEN + 1], int cnt) {
+    char line[160];
     FILE *f;
+    int i, left = cnt;
 
-    snprintf(out, out_len, "%s", id);
+    for (i = 0; i < cnt; i++) {
+        snprintf(names[i], GID_TITLE_LEN + 1, "%.*s", GID_TITLE_LEN, ids[i]);
+    }
 
     f = fopen(GID_TITLES_PATH, "r");
     if (!f) {
@@ -768,27 +746,32 @@ static void gid_title(const char *id, char *out, int out_len) {
         return;
     }
 
-    while (fgets(line, sizeof(line), f)) {
+    while (left && fgets(line, sizeof(line), f)) {
         char *eq = strchr(line, '=');
         int n;
 
         if (!eq) {
             continue;
         }
-        *eq = 0;
-        if (strcmp(line, id) != 0) {
-            continue;
-        }
+        *eq++ = 0;
 
-        eq++;
         n = strlen(eq);
         while (n && (eq[n - 1] == '\n' || eq[n - 1] == '\r')) {
             eq[--n] = 0;
         }
-        if (n) {
-            snprintf(out, out_len, "%s", eq);
+        if (!n) {
+            continue;
         }
-        break;
+
+        for (i = 0; i < cnt; i++) {
+            /* Skipping ids already resolved means a duplicate later in the
+             * file cannot overwrite the first match. */
+            if (strcmp(names[i], ids[i]) == 0 && strcmp(line, ids[i]) == 0) {
+                snprintf(names[i], GID_TITLE_LEN + 1, "%s", eq);
+                left--;
+                break;
+            }
+        }
     }
     fclose(f);
 }
@@ -980,23 +963,23 @@ static int mapping_wizard(void) {
         }
     }
     {
+        char ids[GID_HIST_MAX][GC_APP_GID_LEN + 1];
         char names[GID_HIST_MAX][GID_TITLE_LEN + 1];
-        char gameid[GC_APP_GID_LEN + 1];
-        char readable[GC_APP_GID_LEN + 1];
         u8 scope = GC_APP_SCOPE_GLOBAL;
         int cnt = 0, k;
 
         for (k = 0; k < GID_HIST_MAX; k++) {
-            if (app_get_gameid(chan, k, gameid) < 0 || !gameid[0]) {
+            if (app_get_gameid(chan, k, ids[cnt]) < 0 || !ids[cnt][0]) {
                 break;
             }
-            gid_readable(gameid, readable, sizeof(readable));
-            gid_title(readable, names[cnt], GID_TITLE_LEN + 1);
             cnt++;
         }
 
         if (cnt) {
+            /* Off the bus before touching the card, and the names have to be in
+             * hand before the menu can draw. */
             pad_settle();
+            gid_titles(ids, names, cnt);
             scope = scope_menu(names, cnt);
             si_grab();
         }
