@@ -35,8 +35,13 @@ INCLUDES	:=
 # Same string the firmware stamps into its image, from the same repo, so a
 # support request can name both halves and they can be told apart. Falls back
 # rather than failing when the tree is not a git checkout.
+#
+# No --dirty, deliberately. This builds under WSL against a tree checked out by
+# Windows git, which converts to CRLF on the way out; WSL git compares that
+# against the LF blobs and calls every one of the three hundred odd files
+# modified. The flag would be stuck on and would say nothing.
 #---------------------------------------------------------------------------------
-APP_VERSION	:=	$(shell git -C $(CURDIR) describe --always --tags --dirty 2>/dev/null || echo unknown)
+APP_VERSION	:=	$(shell git -C $(CURDIR) describe --always --tags 2>/dev/null || echo unknown)
 
 #---------------------------------------------------------------------------------
 # options for code generation
