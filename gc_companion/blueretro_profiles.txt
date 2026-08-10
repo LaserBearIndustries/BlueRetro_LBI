@@ -1,0 +1,123 @@
+# BlueRetro Companion premade profiles.
+#
+# Each profile is a [Name] line followed by one mapping per line:
+#
+#   SOURCE,DEST[,max[,threshold[,deadzone[,turbo]]]]
+#
+# SOURCE is the button on the Bluetooth controller, DEST is what the GameCube
+# sees. Names are the ones the Live input viewer prints, so whatever is on
+# screen there can be typed straight in here. max, threshold, deadzone and
+# turbo default to 100, 50, 0 and 0.
+#
+# A profile replaces the whole mapping for that controller, so list everything
+# it should do. The reset, pairing and power off combos are added for you and
+# do not need listing.
+#
+# Face buttons are RB_DOWN, RB_RIGHT, RB_LEFT and RB_UP, meaning the bottom,
+# right, left and top of the diamond as your thumb sees it.
+
+[GameCube default]
+# What the adapter ships with. Face buttons by position, so the button under
+# your thumb is A wherever the pad prints it.
+LX_LEFT,LX_LEFT,100,50
+LX_RIGHT,LX_RIGHT,100,50
+LY_DOWN,LY_DOWN,100,50
+LY_UP,LY_UP,100,50
+RX_LEFT,RX_LEFT,100,50
+RX_RIGHT,RX_RIGHT,100,50
+RY_DOWN,RY_DOWN,100,50
+RY_UP,RY_UP,100,50
+LD_LEFT,LD_LEFT,100,50
+LD_RIGHT,LD_RIGHT,100,50
+LD_DOWN,LD_DOWN,100,50
+LD_UP,LD_UP,100,50
+RB_LEFT,RB_LEFT,100,50
+RB_RIGHT,RB_RIGHT,100,50
+RB_DOWN,RB_DOWN,100,50
+RB_UP,RB_UP,100,50
+MM,MM,100,50
+LM,LM,100,50
+LM,LT,100,95
+LS,LS,100,50
+RM,RM,100,50
+RM,RT,100,95
+RS,RS,100,50
+
+[Nintendo face layout]
+# For pads printed the Nintendo way round, where B is bottom and A is right.
+# Swaps the two pairs so the printed letters match what the game gets.
+LX_LEFT,LX_LEFT,100,50
+LX_RIGHT,LX_RIGHT,100,50
+LY_DOWN,LY_DOWN,100,50
+LY_UP,LY_UP,100,50
+RX_LEFT,RX_LEFT,100,50
+RX_RIGHT,RX_RIGHT,100,50
+RY_DOWN,RY_DOWN,100,50
+RY_UP,RY_UP,100,50
+LD_LEFT,LD_LEFT,100,50
+LD_RIGHT,LD_RIGHT,100,50
+LD_DOWN,LD_DOWN,100,50
+LD_UP,LD_UP,100,50
+RB_RIGHT,RB_DOWN,100,50
+RB_DOWN,RB_RIGHT,100,50
+RB_UP,RB_LEFT,100,50
+RB_LEFT,RB_UP,100,50
+MM,MM,100,50
+LM,LM,100,50
+LM,LT,100,95
+LS,LS,100,50
+RM,RM,100,50
+RM,RT,100,95
+RS,RS,100,50
+
+[Digital triggers]
+# For pads with no analog travel in the triggers, such as the Switch Pro. The
+# trigger button drives the GameCube's analog value to full and asserts the
+# click, so games that want either one get it.
+LX_LEFT,LX_LEFT,100,50
+LX_RIGHT,LX_RIGHT,100,50
+LY_DOWN,LY_DOWN,100,50
+LY_UP,LY_UP,100,50
+RX_LEFT,RX_LEFT,100,50
+RX_RIGHT,RX_RIGHT,100,50
+RY_DOWN,RY_DOWN,100,50
+RY_UP,RY_UP,100,50
+LD_LEFT,LD_LEFT,100,50
+LD_RIGHT,LD_RIGHT,100,50
+LD_DOWN,LD_DOWN,100,50
+LD_UP,LD_UP,100,50
+RB_LEFT,RB_LEFT,100,50
+RB_RIGHT,RB_RIGHT,100,50
+RB_DOWN,RB_DOWN,100,50
+RB_UP,RB_UP,100,50
+MM,MM,100,50
+LS,LM,100,50
+LS,LT,100,50
+RS,RM,100,50
+RS,RT,100,50
+
+[Southpaw]
+# Sticks swapped, for playing left handed. Everything else as the default.
+LX_LEFT,RX_LEFT,100,50
+LX_RIGHT,RX_RIGHT,100,50
+LY_DOWN,RY_DOWN,100,50
+LY_UP,RY_UP,100,50
+RX_LEFT,LX_LEFT,100,50
+RX_RIGHT,LX_RIGHT,100,50
+RY_DOWN,LY_DOWN,100,50
+RY_UP,LY_UP,100,50
+LD_LEFT,LD_LEFT,100,50
+LD_RIGHT,LD_RIGHT,100,50
+LD_DOWN,LD_DOWN,100,50
+LD_UP,LD_UP,100,50
+RB_LEFT,RB_LEFT,100,50
+RB_RIGHT,RB_RIGHT,100,50
+RB_DOWN,RB_DOWN,100,50
+RB_UP,RB_UP,100,50
+MM,MM,100,50
+LM,LM,100,50
+LM,LT,100,95
+LS,LS,100,50
+RM,RM,100,50
+RM,RT,100,95
+RS,RS,100,50

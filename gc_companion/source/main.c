@@ -75,6 +75,14 @@
 #define GID_TITLES_PATH "blueretro_games.txt"
 #define GID_TITLE_LEN 40
 
+/* Ready made mappings, so a known good layout does not have to be captured
+ * button by button. On the card rather than built in, for the same reason as
+ * the game titles: it can be added to without rebuilding anything. */
+#define PROFILES_PATH "blueretro_profiles.txt"
+#define PROFILE_NAME_LEN 40
+#define PROFILE_MAX 16
+#define MAP_MAX 64
+
 /* Debug log download. */
 #define GC_LOG_CMD 0x24
 #define GC_LOG_STATUS_CMD 0x25
@@ -850,14 +858,340 @@ static u8 scope_menu(char names[GID_HIST_MAX][GID_TITLE_LEN + 1], int cnt) {
     }
 }
 
+/* Shared by the wizard and the premade profiles. Both arrive here with a
+ * mapping and the port it belongs to, and everything after that is identical:
+ * the combos, the question of which profile to write, and the push.
+ *
+ * Sharing it is the point. This path has been wrong twice, once for holding
+ * the capture mute across a menu and once for polling by attempt count, and
+ * neither was worth the chance of fixing in one copy and not the other. */
+static u8 map_commit(int chan, int port, struct map_entry *map, int n) {
+    char ids[GID_HIST_MAX][GC_APP_GID_LEN + 1];
+    char names[GID_HIST_MAX][GID_TITLE_LEN + 1];
+    u8 args[8], scope = GC_APP_SCOPE_GLOBAL, st = GC_APP_ST_BUSY;
+    u64 start;
+    int i, cnt = 0;
+
+    /* Appended here rather than by each caller, so a hand written profile
+     * cannot cost the adapter its reset, pairing and power off gestures by
+     * simply not knowing about them. */
+    for (i = 0; i < BR_COMBO_CNT && n < MAP_MAX; i++) {
+        map[n].src = combo_src[i];  map[n].dst = (u8)(BR_COMBO_BASE_1 + i);
+        map[n].dst_id = (u8)port;   map[n].max = 100;
+        map[n].thr = 50;            map[n].dz = 135;
+        map[n].turbo = 0;           n++;
+    }
+
+    args[0] = (u8)port;
+    app_map_send(chan, GC_APP_MAP_BEGIN, args, 1);
+    for (i = 0; i < n; i++) {
+        args[0] = (u8)i;            args[1] = map[i].src;
+        args[2] = map[i].dst;       args[3] = map[i].dst_id;
+        args[4] = map[i].max;       args[5] = map[i].thr;
+        args[6] = map[i].dz;        args[7] = map[i].turbo;
+        if (app_map_send(chan, GC_APP_MAP_SET, args, 8) < 0) {
+            printf("\n  Transfer failed at entry %d.\n", i);
+            app_map_send(chan, GC_APP_MAP_CANCEL, NULL, 0);
+            app_mode_send(chan, 0, (u8)port);
+            pad_settle();
+            return GC_APP_ST_ERROR;
+        }
+    }
+
+    for (i = 0; i < GID_HIST_MAX; i++) {
+        if (app_get_gameid(chan, i, ids[cnt]) < 0 || !ids[cnt][0]) {
+            break;
+        }
+        cnt++;
+    }
+
+    /* Capture mute off before anything asks for a button press. It holds the
+     * mapped controller's port neutral, and that controller is normally the
+     * only one connected, so a menu drawn while it is still muted cannot be
+     * answered on the very pad that was just configured.
+     *
+     * It also makes the port look like an idle controller rather than an
+     * absent one, so leaving it on reads as a pad that is connected and does
+     * nothing, which survives unplugging and reconnecting it. */
+    app_mode_send(chan, 0, (u8)port);
+
+    if (cnt) {
+        /* Off the bus before touching the card, and the names have to be in
+         * hand before the menu can draw. */
+        pad_settle();
+        gid_titles(ids, names, cnt);
+        scope = scope_menu(names, cnt);
+        si_grab();
+    }
+
+    args[0] = (u8)n;
+    args[1] = scope;
+    app_map_send(chan, GC_APP_MAP_COMMIT, args, 2);
+
+    /* Bounded by the clock rather than by a count of attempts. An attempt
+     * costs whatever a failed transfer costs, which is not fixed and is not
+     * something this loop should be quietly paying a multiple of. */
+    start = gettime();
+    while (ticks_to_millisecs(diff_ticks(start, gettime())) < 10000) {
+        if (app_read_status(chan, &st) == 0
+                && (st == GC_APP_ST_OK || st == GC_APP_ST_ERROR)) {
+            break;
+        }
+        usleep(10000);
+    }
+
+    pad_settle();
+    return st;
+}
+
+/* ------------------------------------------------------------------ *
+ * Premade profiles
+ *
+ * The file is sections of the form
+ *
+ *   [Some layout]
+ *   RB_DOWN,RB_RIGHT
+ *   LM,LT,100,95
+ *
+ * one mapping per line, source button then destination, optionally followed
+ * by max, threshold, deadzone and turbo. Names are the ones the input viewer
+ * shows, so what is on screen can be typed straight into a profile.
+ * ------------------------------------------------------------------ */
+
+static int btn_from_name(const char *name) {
+    int i;
+
+    for (i = 0; i < 32; i++) {
+        if (btn_name[i] && strcmp(btn_name[i], name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static char *trim(char *str) {
+    int n;
+
+    while (*str == ' ' || *str == '\t') {
+        str++;
+    }
+    n = strlen(str);
+    while (n && (str[n - 1] == '\n' || str[n - 1] == '\r'
+            || str[n - 1] == ' ' || str[n - 1] == '\t')) {
+        str[--n] = 0;
+    }
+    return str;
+}
+
+/* Both passes walk the same file: once to collect the section names for the
+ * menu, once to read the chosen section's entries. want < 0 asks for names. */
+static int profiles_read(char names[][PROFILE_NAME_LEN + 1], int want,
+        struct map_entry *map, int port, int *bad_lines) {
+    char line[128];
+    FILE *f;
+    int found = 0, section = -1, n = 0;
+
+    if (bad_lines) {
+        *bad_lines = 0;
+    }
+    if (!fat_ready()) {
+        return 0;
+    }
+
+    f = fopen(PROFILES_PATH, "r");
+    if (!f) {
+        f = fopen("sd:/" PROFILES_PATH, "r");
+    }
+    if (!f) {
+        return 0;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        char *p = trim(line);
+        char *field[6];
+        int i, src, dst;
+
+        if (!*p || *p == '#') {
+            continue;
+        }
+
+        if (*p == '[') {
+            char *end = strchr(p, ']');
+
+            if (!end) {
+                continue;
+            }
+            *end = 0;
+            section++;
+            if (want < 0) {
+                if (found < PROFILE_MAX) {
+                    snprintf(names[found], PROFILE_NAME_LEN + 1, "%s", p + 1);
+                    found++;
+                }
+            }
+            continue;
+        }
+
+        if (want < 0 || section != want || n >= MAP_MAX - BR_COMBO_CNT) {
+            continue;
+        }
+
+        for (i = 0; i < 6; i++) {
+            field[i] = NULL;
+        }
+        for (i = 0; i < 6 && p; i++) {
+            char *comma = strchr(p, ',');
+
+            if (comma) {
+                *comma = 0;
+            }
+            field[i] = trim(p);
+            p = comma ? comma + 1 : NULL;
+        }
+
+        src = field[0] ? btn_from_name(field[0]) : -1;
+        dst = field[1] ? btn_from_name(field[1]) : -1;
+        if (src < 0 || dst < 0) {
+            /* Counted rather than refused. One mistyped name should cost that
+             * line, not the profile. */
+            if (bad_lines) {
+                (*bad_lines)++;
+            }
+            continue;
+        }
+
+        map[n].src = (u8)src;
+        map[n].dst = (u8)dst;
+        map[n].dst_id = (u8)port;
+        map[n].max = field[2] ? (u8)atoi(field[2]) : 100;
+        map[n].thr = field[3] ? (u8)atoi(field[3]) : 50;
+        map[n].dz = field[4] ? (u8)atoi(field[4]) : 0;
+        map[n].turbo = field[5] ? (u8)atoi(field[5]) : 0;
+        n++;
+    }
+    fclose(f);
+
+    return (want < 0) ? found : n;
+}
+
+static int profile_menu(char names[][PROFILE_NAME_LEN + 1], int cnt) {
+    int sel = 0;
+
+    for (;;) {
+        u16 down;
+        int i;
+
+        printf("\x1b[2J\x1b[1;1H");
+        printf("Premade profiles\n================\n\n");
+
+        for (i = 0; i < cnt; i++) {
+            printf("   %s %s\n", sel == i ? ">" : " ", names[i]);
+        }
+        printf("   %s Back\n", sel == cnt ? ">" : " ");
+        printf("\n  Applies to whichever controller reported last, so\n");
+        printf("  press something on the one you mean first.\n");
+        printf("\n  D-pad to choose, A to apply, B to go back.\n");
+
+        do {
+            down = pad_any_down();
+            VIDEO_WaitVSync();
+        } while (!down);
+
+        if (down & PAD_BUTTON_UP) {
+            sel = (sel + cnt) % (cnt + 1);
+        }
+        if (down & PAD_BUTTON_DOWN) {
+            sel = (sel + 1) % (cnt + 1);
+        }
+        if (down & PAD_BUTTON_B) {
+            return -1;
+        }
+        if (down & PAD_BUTTON_A) {
+            return (sel == cnt) ? -1 : sel;
+        }
+    }
+}
+
+static void premade_profiles(void) {
+    static struct map_entry map[MAP_MAX];
+    char names[PROFILE_MAX][PROFILE_NAME_LEN + 1];
+    u8 dev, st;
+    u32 btns;
+    s8 ax[GC_APP_AXIS_CNT];
+    int chan, cnt, pick, n, bad = 0, port = 0;
+
+    cnt = profiles_read(names, -1, NULL, 0, NULL);
+    if (cnt <= 0) {
+        printf("\x1b[2J\x1b[1;1H");
+        printf("Premade profiles\n================\n\n");
+        printf("  No %s on the card.\n\n", PROFILES_PATH);
+        printf("  It ships alongside the app. Each profile is a\n");
+        printf("  [Name] line followed by one SRC,DST per line.\n");
+        wait_ack();
+        return;
+    }
+
+    pick = profile_menu(names, cnt);
+    if (pick < 0) {
+        return;
+    }
+
+    si_grab();
+    chan = ota_find_adapter();
+    if (chan < 0) {
+        pad_settle();
+        printf("\nNo BlueRetro adapter answered on any port.\n");
+        wait_ack();
+        return;
+    }
+
+    /* Same rule as the wizard: whichever device last reported is the one
+     * being configured. */
+    if (app_read_input(chan, &dev, &btns, ax) == 0 && dev != GC_APP_NO_DEV) {
+        port = dev;
+    }
+
+    pad_settle();
+    n = profiles_read(NULL, pick, map, port, &bad);
+    si_grab();
+
+    if (n <= 0) {
+        pad_settle();
+        printf("\x1b[2J\x1b[1;1H");
+        printf("  %s has no usable entries.\n", names[pick]);
+        wait_ack();
+        return;
+    }
+
+    printf("\x1b[2J\x1b[1;1H");
+    printf("Premade profiles\n================\n\n");
+    printf("  Applying %s to port %d, %d entries.\n", names[pick], port + 1, n);
+
+    st = map_commit(chan, port, map, n);
+
+    printf("\x1b[2J\x1b[1;1H");
+    if (st == GC_APP_ST_OK) {
+        printf("Profile applied.\n\n  %s on port %d.\n", names[pick], port + 1);
+        printf("  It takes effect immediately, no restart.\n");
+    }
+    else {
+        printf("Profile NOT applied.\n\n  The adapter reported status %u.\n", st);
+        printf("  Your previous mapping is untouched.\n");
+    }
+    if (bad) {
+        printf("\n  %d line%s skipped, unrecognised button name.\n",
+            bad, bad == 1 ? " was" : "s were");
+    }
+    wait_ack();
+}
+
 static int mapping_wizard(void) {
     struct map_entry map[64];
-    u8 dev, st, args[8];
+    u8 dev, st;
     u32 btns;
     s8 ax[GC_APP_AXIS_CNT];
     int chan, i, s, n = 0, port = 0;
     int trig_mode, total, shown = 0;
-    u64 commit_start;
 
     /* Asked while libogc can still read the GameCube pad, before the manual
      * transfers take the bus. */
@@ -971,79 +1305,9 @@ static int mapping_wizard(void) {
         }
     }
 
-    for (i = 0; i < BR_COMBO_CNT; i++) {
-        map[n].src = combo_src[i];  map[n].dst = (u8)(BR_COMBO_BASE_1 + i);
-        map[n].dst_id = (u8)port;   map[n].max = 100;
-        map[n].thr = 50;            map[n].dz = 135;
-        map[n].turbo = 0;           n++;
-    }
-
     printf("\x1b[2J\x1b[1;1H");
     printf("Mapping wizard\n==============\n\n  Saving %d entries...\n", n);
-
-    args[0] = (u8)port;
-    app_map_send(chan, GC_APP_MAP_BEGIN, args, 1);
-    for (i = 0; i < n; i++) {
-        args[0] = (u8)i;            args[1] = map[i].src;
-        args[2] = map[i].dst;       args[3] = map[i].dst_id;
-        args[4] = map[i].max;       args[5] = map[i].thr;
-        args[6] = map[i].dz;        args[7] = map[i].turbo;
-        if (app_map_send(chan, GC_APP_MAP_SET, args, 8) < 0) {
-            printf("\n  Transfer failed at entry %d.\n", i);
-            goto cancelled;
-        }
-    }
-    {
-        char ids[GID_HIST_MAX][GC_APP_GID_LEN + 1];
-        char names[GID_HIST_MAX][GID_TITLE_LEN + 1];
-        u8 scope = GC_APP_SCOPE_GLOBAL;
-        int cnt = 0, k;
-
-        for (k = 0; k < GID_HIST_MAX; k++) {
-            if (app_get_gameid(chan, k, ids[cnt]) < 0 || !ids[cnt][0]) {
-                break;
-            }
-            cnt++;
-        }
-
-        /* Capture mute off before anything asks for a button press. It holds
-         * the mapped controller's port neutral, and that controller is normally
-         * the only one connected, so a menu drawn while it is still muted
-         * cannot be answered on the very pad that was just configured.
-         *
-         * It also makes the port look like an idle controller rather than an
-         * absent one, so leaving it on reads as a pad that is connected but
-         * does nothing, which survives unplugging and reconnecting it. */
-        app_mode_send(chan, 0, (u8)port);
-
-        if (cnt) {
-            /* Off the bus before touching the card, and the names have to be in
-             * hand before the menu can draw. */
-            pad_settle();
-            gid_titles(ids, names, cnt);
-            scope = scope_menu(names, cnt);
-            si_grab();
-        }
-
-        args[0] = (u8)n;
-        args[1] = scope;
-        app_map_send(chan, GC_APP_MAP_COMMIT, args, 2);
-    }
-
-    /* Bounded by the clock rather than by a count of attempts. An attempt costs
-     * whatever a failed transfer costs, which is not fixed and is not something
-     * this loop should be quietly paying a multiple of. */
-    st = GC_APP_ST_BUSY;
-    commit_start = gettime();
-    while (ticks_to_millisecs(diff_ticks(commit_start, gettime())) < 10000) {
-        if (app_read_status(chan, &st) == 0
-                && (st == GC_APP_ST_OK || st == GC_APP_ST_ERROR)) {
-            break;
-        }
-        usleep(10000);
-    }
-
-    pad_settle();
+    st = map_commit(chan, port, map, n);
 
     printf("\x1b[2J\x1b[1;1H");
     if (st == GC_APP_ST_OK) {
@@ -1356,10 +1620,11 @@ static int main_menu(void) {
         printf("  app      %s\n", APP_VERSION);
         printf("  adapter  %s\n\n", adapter_ver[0] ? adapter_ver : "not detected");
         printf("   %s Remap a controller\n", sel == 0 ? ">" : " ");
-        printf("   %s Live input viewer\n", sel == 1 ? ">" : " ");
-        printf("   %s Debug log\n", sel == 2 ? ">" : " ");
-        printf("   %s Firmware slots\n", sel == 3 ? ">" : " ");
-        printf("   %s Update firmware\n", sel == 4 ? ">" : " ");
+        printf("   %s Apply a premade profile\n", sel == 1 ? ">" : " ");
+        printf("   %s Live input viewer\n", sel == 2 ? ">" : " ");
+        printf("   %s Debug log\n", sel == 3 ? ">" : " ");
+        printf("   %s Firmware slots\n", sel == 4 ? ">" : " ");
+        printf("   %s Update firmware\n", sel == 5 ? ">" : " ");
         printf("\n  D-pad to choose, A to select, START to exit.\n");
 
         do {
@@ -1371,10 +1636,10 @@ static int main_menu(void) {
             app_exit();
         }
         if (down & PAD_BUTTON_UP) {
-            sel = (sel + 4) % 5;
+            sel = (sel + 5) % 6;
         }
         if (down & PAD_BUTTON_DOWN) {
-            sel = (sel + 1) % 5;
+            sel = (sel + 1) % 6;
         }
         if (down & PAD_BUTTON_A) {
             printf("\x1b[2J\x1b[1;1H");
@@ -2029,14 +2294,18 @@ int main(int argc, char **argv) {
             wait_exit();
         }
         else if (choice == 1) {
-            input_viewer();
+            premade_profiles();
             wait_exit();
         }
         else if (choice == 2) {
-            debug_log_menu();
+            input_viewer();
             wait_exit();
         }
         else if (choice == 3) {
+            debug_log_menu();
+            wait_exit();
+        }
+        else if (choice == 4) {
             firmware_slots_menu();
             wait_exit();
         }
