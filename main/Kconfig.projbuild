@@ -58,6 +58,19 @@ menu "BlueRetro"
             flushed a kilobyte at a time; the status opcode reports busy while
             flash is being written so the console knows to wait. Prototype.
 
+    config BLUERETRO_GC_LOG
+        bool "Download the Bluetooth debug log over the GameCube port"
+        default n
+        help
+            Adds vendor SI opcodes 0x24 to 0x26, which turn the debug capture
+            bank on and off, report how much has been captured, and read it
+            back a chunk at a time.
+
+            The capture itself already exists and already lands in the memory
+            card buffer. What was missing was any way to reach it without the
+            Bluetooth web config, which is no help when Bluetooth is the thing
+            being diagnosed. Prototype.
+
     config BLUERETRO_GC_APP
         bool "Expose adapter state to the GameCube companion app"
         default n

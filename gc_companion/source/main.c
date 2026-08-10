@@ -64,6 +64,25 @@
 #define GC_APP_ST_ERROR 3
 #define GC_APP_ST_MUTED 0x80
 
+/* Debug log download. */
+#define GC_LOG_CMD 0x24
+#define GC_LOG_STATUS_CMD 0x25
+#define GC_LOG_READ_CMD 0x26
+#define GC_LOG_CHUNK 8
+#define GC_LOG_STATUS_LEN 8
+#define GC_LOG_PROTO_VER 1
+
+#define GC_LOG_SUB_BANK_OFF 0
+#define GC_LOG_SUB_BANK_ON 1
+#define GC_LOG_SUB_RESET 2
+
+#define GC_LOG_ST_IDLE 0
+#define GC_LOG_ST_BUSY 1
+#define GC_LOG_ST_OK 2
+#define GC_LOG_ST_ERROR 3
+
+#define LOG_PATH "br_debug_trace.bin"
+
 /* Generic button ids the GameCube driver understands, from adapter.h:108. */
 #define PAD_LX_LEFT 0
 #define PAD_LX_RIGHT 1
@@ -807,6 +826,214 @@ cancelled:
 }
 
 /* Returns 0 mapping wizard, 1 input viewer, 2 firmware update. */
+static int log_status(int chan, u8 *bank, u8 *state, u32 *len) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+
+    req[0] = GC_LOG_STATUS_CMD;
+    memset(in, 0, sizeof(in));
+
+    if (si_xfer(chan, req, 1, in, GC_LOG_STATUS_LEN) < 0) {
+        return -1;
+    }
+    if (in[0] != GC_LOG_PROTO_VER) {
+        return -1;
+    }
+
+    *bank = in[1];
+    *state = in[2];
+    *len = (u32)in[4] | ((u32)in[5] << 8) | ((u32)in[6] << 16) | ((u32)in[7] << 24);
+    return 0;
+}
+
+static int log_send(int chan, u8 sub) {
+    static u8 out[32] ATTRIBUTE_ALIGN(32);
+
+    out[0] = GC_LOG_CMD;
+    out[1] = sub;
+
+    /* Write only, like the mapping commands. */
+    return si_xfer(chan, out, 2, NULL, 0);
+}
+
+static int log_read(int chan, u16 chunk, u8 *out8) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+
+    req[0] = GC_LOG_READ_CMD;
+    req[1] = (u8)chunk;
+    req[2] = (u8)(chunk >> 8);
+    memset(in, 0, sizeof(in));
+
+    if (si_xfer(chan, req, 3, in, GC_LOG_CHUNK) < 0) {
+        return -1;
+    }
+    memcpy(out8, in, GC_LOG_CHUNK);
+    return 0;
+}
+
+/* Both bank changes write the adapter's config file, so wait the busy out
+ * the same way the firmware update does. */
+static int log_wait_idle(int chan) {
+    u64 start = gettime();
+    u8 bank, state;
+    u32 len;
+
+    for (;;) {
+        if (log_status(chan, &bank, &state, &len) == 0 && state != GC_LOG_ST_BUSY) {
+            return (state == GC_LOG_ST_ERROR) ? -1 : 0;
+        }
+        if (ticks_to_millisecs(diff_ticks(start, gettime())) > READY_TIMEOUT_MS) {
+            return -1;
+        }
+        VIDEO_WaitVSync();
+    }
+}
+
+static void log_download(int chan, u32 len) {
+    static u8 buf[GC_LOG_CHUNK];
+    FILE *f;
+    u32 done = 0;
+    int last_pct = -1;
+
+    if (len == 0) {
+        printf("\nNothing captured yet.\n");
+        return;
+    }
+
+    /* FAT is only needed here, so it is not mounted until now: the rest of
+     * the app runs fine with no card in the slot. */
+    if (!fatInitDefault()) {
+        printf("\nNo FAT device. Need an SD Gecko or SD2SP2.\n");
+        return;
+    }
+
+    f = fopen(LOG_PATH, "wb");
+    if (!f) {
+        f = fopen("sd:/" LOG_PATH, "wb");
+    }
+    if (!f) {
+        printf("\nCould not open %s for writing.\n", LOG_PATH);
+        return;
+    }
+
+    printf("\nSaving %lu bytes to %s\n", (unsigned long)len, LOG_PATH);
+
+    while (done < len) {
+        u32 want = len - done;
+        int pct;
+
+        if (want > GC_LOG_CHUNK) {
+            want = GC_LOG_CHUNK;
+        }
+
+        /* Chunks are addressed, so a dropped transaction is just a re-read
+         * rather than every later byte landing at the wrong offset. */
+        if (log_read(chan, (u16)(done / GC_LOG_CHUNK), buf) < 0) {
+            printf("\nRead failed at %lu bytes.\n", (unsigned long)done);
+            fclose(f);
+            return;
+        }
+        if (fwrite(buf, 1, want, f) != want) {
+            printf("\nWrite failed at %lu bytes.\n", (unsigned long)done);
+            fclose(f);
+            return;
+        }
+        done += want;
+
+        pct = (int)((done * 100) / len);
+        if (pct != last_pct) {
+            last_pct = pct;
+            printf("\r  %d%%  ", pct);
+        }
+    }
+
+    fclose(f);
+    printf("\nDone. Copy %s off the card and send it over.\n", LOG_PATH);
+}
+
+static void debug_log_menu(void) {
+    int chan, sel = 0;
+
+    SI_DisablePolling(SI_CHAN0_BIT | SI_CHAN1_BIT | SI_CHAN2_BIT | SI_CHAN3_BIT);
+
+    chan = ota_find_adapter();
+    if (chan < 0) {
+        printf("\nNo BlueRetro adapter answered on any port.\n");
+        pad_settle();
+        return;
+    }
+
+    for (;;) {
+        u8 bank = 0, state = 0;
+        u32 len = 0;
+        u16 down;
+
+        if (log_status(chan, &bank, &state, &len) < 0) {
+            printf("\nThis firmware has no debug log support.\n");
+            printf("Rebuild with CONFIG_BLUERETRO_GC_LOG.\n");
+            pad_settle();
+            return;
+        }
+
+        printf("\x1b[2J\x1b[1;1H");
+        printf("BlueRetro Companion - debug log\n");
+        printf("===============================\n\n");
+        printf("  Adapter on port %d\n", chan + 1);
+        printf("  Capturing: %s\n", bank ? "YES" : "no");
+        printf("  Captured:  %lu bytes\n\n", (unsigned long)len);
+        printf("   %s Start a fresh capture\n", sel == 0 ? ">" : " ");
+        printf("   %s Stop capturing\n", sel == 1 ? ">" : " ");
+        printf("   %s Save log to SD card\n", sel == 2 ? ">" : " ");
+        printf("   %s Back\n", sel == 3 ? ">" : " ");
+        printf("\n  Capture survives a reboot, so start one, reproduce the\n");
+        printf("  fault, then come back here and save.\n");
+
+        do {
+            down = pad_any_down();
+            VIDEO_WaitVSync();
+        } while (!down);
+
+        if (down & PAD_BUTTON_UP) {
+            sel = (sel + 3) % 4;
+        }
+        if (down & PAD_BUTTON_DOWN) {
+            sel = (sel + 1) % 4;
+        }
+        if (down & PAD_BUTTON_B) {
+            return;
+        }
+        if (!(down & PAD_BUTTON_A)) {
+            continue;
+        }
+
+        switch (sel) {
+            case 0:
+                /* Enabling rewinds on the adapter side, so this always
+                 * starts from an empty buffer. */
+                log_send(chan, GC_LOG_SUB_BANK_ON);
+                if (log_wait_idle(chan) < 0) {
+                    printf("\nCould not enable capture.\n");
+                    pad_settle();
+                }
+                break;
+            case 1:
+                log_send(chan, GC_LOG_SUB_BANK_OFF);
+                if (log_wait_idle(chan) < 0) {
+                    printf("\nCould not disable capture.\n");
+                    pad_settle();
+                }
+                break;
+            case 2:
+                log_download(chan, len);
+                pad_settle();
+                break;
+            default:
+                return;
+        }
+    }
+}
+
 static int main_menu(void) {
     int sel = 0;
 
@@ -818,7 +1045,8 @@ static int main_menu(void) {
         printf("===================\n\n");
         printf("   %s Remap a controller\n", sel == 0 ? ">" : " ");
         printf("   %s Live input viewer\n", sel == 1 ? ">" : " ");
-        printf("   %s Update firmware\n", sel == 2 ? ">" : " ");
+        printf("   %s Debug log\n", sel == 2 ? ">" : " ");
+        printf("   %s Update firmware\n", sel == 3 ? ">" : " ");
         printf("\n  D-pad to choose, A to select, START to exit.\n");
 
         do {
@@ -830,10 +1058,10 @@ static int main_menu(void) {
             exit(0);
         }
         if (down & PAD_BUTTON_UP) {
-            sel = (sel + 2) % 3;
+            sel = (sel + 3) % 4;
         }
         if (down & PAD_BUTTON_DOWN) {
-            sel = (sel + 1) % 3;
+            sel = (sel + 1) % 4;
         }
         if (down & PAD_BUTTON_A) {
             printf("\x1b[2J\x1b[1;1H");
@@ -965,6 +1193,10 @@ int main(int argc, char **argv) {
         }
         else if (choice == 1) {
             input_viewer();
+            wait_exit();
+        }
+        else if (choice == 2) {
+            debug_log_menu();
             wait_exit();
         }
         /* Anything else falls through to the firmware update below. Both of the

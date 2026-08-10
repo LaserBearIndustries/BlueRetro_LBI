@@ -39,6 +39,11 @@ static struct bt_mon_hdr mon_hdr = {0};
 static uint32_t log_offset = 0;
 static char log_buffer[512];
 
+/* How far into the memory card buffer the capture has got. Was a function
+ * static inside bt_mon_tx(); it is file scope now so the GameCube side can ask
+ * how much there is to download and rewind it between captures. */
+static uint32_t offset = 0;
+
 void bt_mon_init(void) {
 #ifdef CONFIG_BLUERETRO_BT_H4_TRACE
     uart_config_t uart_cfg = {
@@ -83,7 +88,6 @@ void IRAM_ATTR bt_mon_tx(uint16_t opcode, uint8_t *data, uint16_t len) {
     uart_write_bytes(uart_port, &mon_hdr, sizeof(mon_hdr));
     uart_write_bytes(uart_port, data, len);
 #else
-    static uint32_t offset = 0;
     if (config.global_cfg.banksel == CONFIG_BANKSEL_DBG
             && (offset + sizeof(struct bt_mon_hdr) + len) <= MC_BUFFER_SIZE) {
         uint32_t hdr_len = sizeof(struct bt_mon_hdr);
@@ -113,6 +117,20 @@ void IRAM_ATTR bt_mon_tx(uint16_t opcode, uint8_t *data, uint16_t len) {
         }
     }
 #endif /* CONFIG_BLUERETRO_BT_H4_TRACE */
+}
+
+uint32_t IRAM_ATTR bt_mon_get_log_len(void) {
+#ifdef CONFIG_BLUERETRO_BT_H4_TRACE
+    return 0;
+#else
+    return offset;
+#endif
+}
+
+void IRAM_ATTR bt_mon_log_reset(void) {
+#ifndef CONFIG_BLUERETRO_BT_H4_TRACE
+    offset = 0;
+#endif
 }
 
 void IRAM_ATTR bt_mon_log(bool end, const char * format, ...) {

@@ -26,6 +26,7 @@
 #include "wired/wired_bare.h"
 #include "wired/wired_rtos.h"
 #include "adapter/memory_card.h"
+#include "system/gc_log.h"
 #include "system/manager.h"
 #include "tests/ws_srv.h"
 #include "tests/coverage.h"
@@ -140,6 +141,10 @@ static void wl_init_task(void *arg) {
 
 #ifdef CONFIG_BLUERETRO_GC_APP
     gc_app_init();
+#endif
+
+#ifdef CONFIG_BLUERETRO_GC_LOG
+    gc_log_init();
 #endif
 
 #ifndef CONFIG_BLUERETRO_QEMU

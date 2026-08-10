@@ -24,4 +24,10 @@ void bt_mon_init(void);
 void bt_mon_tx(uint16_t opcode, uint8_t *data, uint16_t len);
 void bt_mon_log(bool end, const char * format, ...);
 
+/* Bytes of capture sitting in the memory card buffer, and a rewind. Both exist
+ * for the GameCube side log download; the offset only ever grows otherwise, so
+ * without the rewind a second capture appends to the first. */
+uint32_t bt_mon_get_log_len(void);
+void bt_mon_log_reset(void);
+
 #endif /* _BT_MON_H_ */
