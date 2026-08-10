@@ -24,9 +24,11 @@
  * another, which is worse than either. */
 static uint8_t stage[sizeof(struct config)];
 
-/* Which chunks actually arrived. Without this a dropped transaction in the
- * middle of a restore is silently adopted as a config with a hole in it, and
- * the hole is wherever the transfer happened to stumble. */
+/* Which chunks actually arrived. Two jobs: a dropped transaction in the middle
+ * of a restore would otherwise be adopted as a config with a hole in it,
+ * wherever the transfer happened to stumble; and requiring every chunk is what
+ * makes clearing the staging buffer unnecessary, since nothing left over in it
+ * can reach the config. */
 static uint8_t received[GC_CFG_BITMAP_LEN];
 
 static volatile uint8_t cfg_state = GC_CFG_ST_IDLE;
@@ -78,13 +80,24 @@ void IRAM_ATTR gc_cfg_write(const uint8_t *payload) {
 void IRAM_ATTR gc_cfg_cmd(const uint8_t *payload) {
     switch (payload[0]) {
         case GC_CFG_SUB_BEGIN:
+            /* Only the arrival bitmap is cleared, not the twelve kilobytes it
+             * describes. Nothing is adopted unless every chunk arrived, so
+             * whatever the buffer held before cannot survive into a restore,
+             * which makes wiping it work for its own sake.
+             *
+             * Two hundred bytes is little enough to do here, and doing it here
+             * means a restore no longer depends on a task running between the
+             * start command and the first chunk. */
+            memset(received, 0, sizeof(received));
+            cfg_missing = 0xFFFF;
+            cfg_state = GC_CFG_ST_READY;
+            break;
         case GC_CFG_SUB_APPLY:
-            /* Both handed to the task. Clearing the staging buffer is twelve
-             * kilobytes of memset, which is far too much to do here: this runs
-             * in the RMT interrupt, and overrunning it costs the very next SI
-             * transaction, which is the first chunk of the transfer. */
-            cfg_state = GC_CFG_ST_BUSY;
-            cfg_req = payload[0];
+            /* Handed over, because adopting it writes flash. */
+            if (cfg_state == GC_CFG_ST_READY) {
+                cfg_state = GC_CFG_ST_BUSY;
+                cfg_req = GC_CFG_SUB_APPLY;
+            }
             break;
         case GC_CFG_SUB_ABORT:
             cfg_state = GC_CFG_ST_IDLE;
@@ -140,15 +153,7 @@ static void gc_cfg_task(void *arg) {
         if (req != GC_CFG_REQ_NONE) {
             cfg_req = GC_CFG_REQ_NONE;
 
-            if (req == GC_CFG_SUB_BEGIN) {
-                memset(stage, 0, sizeof(stage));
-                memset(received, 0, sizeof(received));
-                cfg_missing = 0xFFFF;
-                cfg_state = GC_CFG_ST_READY;
-                printf("# %s: staging %u chunks\n", __FUNCTION__,
-                    (unsigned)GC_CFG_CHUNK_CNT);
-            }
-            else if (gc_cfg_staged_is_sane()) {
+            if (gc_cfg_staged_is_sane()) {
                 memcpy(&config, stage, sizeof(config));
                 config_update(DEFAULT_CFG);
 

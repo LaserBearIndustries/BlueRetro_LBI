@@ -45,9 +45,8 @@ enum {
     GC_CFG_ST_BUSY,
     GC_CFG_ST_OK,
     GC_CFG_ST_ERROR,
-    /* Staging buffer cleared and waiting for chunks. Nothing is accepted before
-     * this, because clearing it happens off the interrupt and the first chunk
-     * would otherwise land in a buffer that is about to be wiped. */
+    /* Waiting for chunks. Entered by the start command itself, so a restore
+     * does not depend on anything running between it and the first chunk. */
     GC_CFG_ST_READY,
 };
 
