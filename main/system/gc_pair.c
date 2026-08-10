@@ -87,46 +87,42 @@ static void gc_pair_refresh(void) {
     snap_cnt = (uint8_t)n;
 }
 
-static void gc_pair_task(void *arg) {
-    uint32_t refresh = 0;
+/* Driven by the settings task rather than one of its own.
+ *
+ * Every task costs a stack out of the same heap the memory card claims 128 KB
+ * of in a single allocation, and only one stack can be taken before it without
+ * leaving its buffers partly unallocated. That is a null pointer dereferenced
+ * from an interrupt, which is exactly as bad as it sounds. Nothing here and in
+ * the settings path ever runs at the same time, so one task does for both. */
+void gc_pair_service(void) {
+    static uint32_t refresh = 0;
+    uint8_t req = pair_req;
 
-    while (1) {
-        uint8_t req = pair_req;
+    pair_tick++;
 
-        pair_tick++;
+    if (req != GC_PAIR_REQ_NONE) {
+        pair_req = GC_PAIR_REQ_NONE;
 
-        if (req != GC_PAIR_REQ_NONE) {
-            pair_req = GC_PAIR_REQ_NONE;
-
-            if (req == GC_PAIR_SUB_FORGET_ALL) {
-                bt_host_pair_forget_all();
-                pair_state = GC_PAIR_ST_OK;
-            }
-            else if (bt_host_pair_forget(pair_arg) == 0) {
-                pair_state = GC_PAIR_ST_OK;
-            }
-            else {
-                pair_state = GC_PAIR_ST_ERROR;
-            }
-            gc_pair_refresh();
+        if (req == GC_PAIR_SUB_FORGET_ALL) {
+            bt_host_pair_forget_all();
+            pair_state = GC_PAIR_ST_OK;
         }
-        else if (refresh++ >= 50) {
-            /* Twice a second is enough for a list someone is reading, and it
-             * keeps the connected column honest as controllers come and go. */
-            refresh = 0;
-            gc_pair_refresh();
+        else if (bt_host_pair_forget(pair_arg) == 0) {
+            pair_state = GC_PAIR_ST_OK;
         }
-
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+        else {
+            pair_state = GC_PAIR_ST_ERROR;
+        }
+        gc_pair_refresh();
+    }
+    else if (refresh++ >= 50) {
+        /* Twice a second is enough for a list someone is reading, and it keeps
+         * the connected column honest as controllers come and go. */
+        refresh = 0;
+        gc_pair_refresh();
     }
 }
 
 void gc_pair_init(void) {
-    if (xTaskCreatePinnedToCore(gc_pair_task, "gc_pair_task", 4096, NULL, 5, NULL, 0)
-            != pdPASS) {
-        pair_state = GC_PAIR_ST_ERROR;
-        printf("# %s: task create failed, pairing list unavailable\n", __FUNCTION__);
-        return;
-    }
-    printf("# %s: ready\n", __FUNCTION__);
+    printf("# %s: ready, serviced by the settings task\n", __FUNCTION__);
 }

@@ -54,6 +54,9 @@ void gc_pair_info(uint8_t *out);
 void gc_pair_entry(uint8_t idx, uint8_t *out);
 void gc_pair_cmd(const uint8_t *payload);
 
+/* Run from an existing task, for the same reason as gc_cfg_service(). */
+void gc_pair_service(void);
+
 void gc_pair_init(void);
 
 #endif /* _GC_PAIR_H_ */

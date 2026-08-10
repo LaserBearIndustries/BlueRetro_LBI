@@ -13,6 +13,12 @@
 #include "adapter/gameid.h"
 #include "bluetooth/host.h"
 #include "gc_app.h"
+#ifdef CONFIG_BLUERETRO_GC_CFG
+#include "gc_cfg.h"
+#endif
+#ifdef CONFIG_BLUERETRO_GC_PAIR
+#include "gc_pair.h"
+#endif
 
 /* A snapshot rather than a pointer to ctrl_input. That buffer is scratch space
  * the bridge reuses for whichever device reported last, and it is filled while
@@ -290,6 +296,16 @@ static void gc_app_task(void *arg) {
         for (uint32_t i = 0; i < GID_HIST_MAX; i++) {
             strncpy(gid_snap[i], gid_hist_get(i), GC_APP_GID_LEN - 1);
         }
+
+        /* Both need work done off the interrupt and neither can afford a task
+         * to do it in. Giving them one each starved sys_mgr_task, which owns
+         * the port LEDs, the reset button and the port mapping. */
+#ifdef CONFIG_BLUERETRO_GC_CFG
+        gc_cfg_service();
+#endif
+#ifdef CONFIG_BLUERETRO_GC_PAIR
+        gc_pair_service();
+#endif
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }

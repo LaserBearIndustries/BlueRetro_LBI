@@ -131,22 +131,18 @@ static void wl_init_task(void *arg) {
     sys_mgr_early_pwr_restore();
 #endif
 
-#ifdef CONFIG_BLUERETRO_GC_CFG
-    /* Ahead of the memory card claiming its buffers. That takes 128 KB of DMA
-     * capable heap in one go, and this needs a task stack from the same pool.
-     * Asking afterwards, as the last init to run, meant asking for whatever was
-     * left, and there was not enough: the task was never created and every
-     * restore sat waiting on it. */
-    gc_cfg_init();
-#endif
-
-#ifdef CONFIG_BLUERETRO_GC_PAIR
-    /* Ahead of it for the same reason. Anything added here that needs a task
-     * belongs on this side of the line. */
-    gc_pair_init();
-#endif
-
-    mc_init_mem();
+    /* Nothing creates a task before this. It claims 128 KB of DMA capable heap
+     * in a single allocation, and what remains afterwards is only just enough
+     * for the tasks that already exist, sys_mgr_task among them, which owns the
+     * port LEDs, the reset button and the port mapping. Taking two stacks ahead
+     * of it left that task uncreated and those three dead.
+     *
+     * Anything new needing to run off the interrupt shares an existing task. */
+    if (mc_init_mem()) {
+        err_led_set();
+        err = 1;
+        printf("Memory card buffer alloc fail!\n");
+    }
 
 #ifndef CONFIG_BLUERETRO_BT_DISABLE
     if (bt_host_init()) {
@@ -174,6 +170,14 @@ static void wl_init_task(void *arg) {
 
 #ifdef CONFIG_BLUERETRO_GC_BOOT
     gc_boot_init();
+#endif
+
+#ifdef CONFIG_BLUERETRO_GC_CFG
+    gc_cfg_init();
+#endif
+
+#ifdef CONFIG_BLUERETRO_GC_PAIR
+    gc_pair_init();
 #endif
 
 #ifndef CONFIG_BLUERETRO_QEMU

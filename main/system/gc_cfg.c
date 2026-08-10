@@ -162,48 +162,39 @@ static uint32_t gc_cfg_staged_is_sane(void) {
     return 1;
 }
 
-static void gc_cfg_task(void *arg) {
-    while (1) {
-        uint8_t req = cfg_req;
+/* Serviced by an existing task rather than one of its own.
+ *
+ * There was room in the heap for exactly zero more. Every stack competes with
+ * the 128 KB the memory card claims in a single allocation, and with
+ * sys_mgr_task, which is created after it and owns the port LEDs, the reset
+ * button and the port mapping. Taking a stack for this starved that. */
+void gc_cfg_service(void) {
+    uint8_t req = cfg_req;
 
-        cfg_tick++;
+    cfg_tick++;
 
-        if (req != GC_CFG_REQ_NONE) {
-            cfg_req = GC_CFG_REQ_NONE;
+    if (req != GC_CFG_REQ_NONE) {
+        cfg_req = GC_CFG_REQ_NONE;
 
-            if (gc_cfg_staged_is_sane()) {
-                memcpy(&config, stage, sizeof(config));
-                config_update(DEFAULT_CFG);
+        if (gc_cfg_staged_is_sane()) {
+            memcpy(&config, stage, sizeof(config));
+            config_update(DEFAULT_CFG);
 
-                /* The mapping arrays just changed underneath every connected
-                 * controller, same as a game id change does. */
-                bt_host_reload_ctrl_maps();
+            /* The mapping arrays just changed underneath every connected
+             * controller, same as a game id change does. */
+            bt_host_reload_ctrl_maps();
 
-                cfg_state = GC_CFG_ST_OK;
-                printf("# %s: settings restored\n", __FUNCTION__);
-            }
-            else {
-                cfg_state = GC_CFG_ST_ERROR;
-                printf("# %s: staged config rejected, keeping current\n", __FUNCTION__);
-            }
+            cfg_state = GC_CFG_ST_OK;
+            printf("# %s: settings restored\n", __FUNCTION__);
         }
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+        else {
+            cfg_state = GC_CFG_ST_ERROR;
+            printf("# %s: staged config rejected, keeping current\n", __FUNCTION__);
+        }
     }
 }
 
 void gc_cfg_init(void) {
-    /* Reported over the wire, not just logged. Without the task nothing ever
-     * adopts a config, so every restore waits on something that will never
-     * happen, and from the console that is indistinguishable from a refusal.
-     * It presented as one for four rounds. */
-    if (xTaskCreatePinnedToCore(gc_cfg_task, "gc_cfg_task", 4096, NULL, 5, NULL, 0)
-            != pdPASS) {
-        cfg_state = GC_CFG_ST_ERROR;
-        cfg_why = GC_CFG_WHY_NO_TASK;
-        printf("# %s: task create failed, settings transfer unavailable\n",
-            __FUNCTION__);
-        return;
-    }
     printf("# %s: ready, %u byte config in %u chunks\n", __FUNCTION__,
         (unsigned)sizeof(struct config), (unsigned)GC_CFG_CHUNK_CNT);
 }

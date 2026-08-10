@@ -72,6 +72,10 @@ void gc_cfg_read(uint16_t chunk, uint8_t *out);
 void gc_cfg_write(const uint8_t *payload);
 void gc_cfg_cmd(const uint8_t *payload);
 
+/* Run from an existing task. Nothing here may take a stack of its own: see
+ * the note in main.c beside mc_init_mem(). */
+void gc_cfg_service(void);
+
 void gc_cfg_init(void);
 
 #endif /* _GC_CFG_H_ */
