@@ -17,14 +17,6 @@ src, dst = sys.argv[1], sys.argv[2]
 
 rows = sqlite3.connect(src).execute("select id, name from games").fetchall()
 
-# Ids the database has no reason to carry. The companion's own matters because
-# launching it is a launch like any other, so it heads the recent list every
-# time; without this it sits there as sixteen hex characters, in the one slot
-# nobody should be picking.
-rows = [
-    ("7E4B33591DF690B4", "BlueRetro Companion (this app)"),
-] + rows
-
 seen = {}
 skipped_fmt = 0
 skipped_dup = 0

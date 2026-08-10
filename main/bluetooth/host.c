@@ -253,7 +253,9 @@ static void bt_fb_task(void *param) {
                     break;
                 case FB_TYPE_SYS_ID:
                     if (gid_update_sys(fb_data)) {
-                        gid_hist_push(gid_get());
+                        /* Not pushed to the history. This is the system's own
+                         * name, sent once at boot, and it turned up in the list
+                         * of recent games as "GC". */
                         config_init(GAMEID_CFG);
                         bt_host_reload_ctrl_maps();
                     }

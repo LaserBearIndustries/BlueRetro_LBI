@@ -67,6 +67,7 @@ char *gid_get(void) {
 
 static char gid_hist[GID_HIST_MAX][GAME_ID_BUF_LEN] = {{0}};
 static uint32_t gid_hist_used = 0;
+static uint32_t gid_app_marked = 1;
 
 /* Newest first, no duplicates. Relaunching the same thing repeatedly is normal,
  * and without the dedupe it would push everything worth remembering off the
@@ -77,6 +78,17 @@ void gid_hist_push(const char *gameid_in) {
     if (gameid_in == NULL || !strlen(gameid_in)) {
         return;
     }
+
+    /* An all zero id is what a disc that never filled the field in reports, and
+     * everything reporting it shares the one id, so it names nothing and a
+     * profile saved against it would apply to all of them at once. */
+    if (strspn(gameid_in, "0") == strlen(gameid_in)) {
+        return;
+    }
+
+    /* Whatever is current when the companion app first speaks is the app's own
+     * id, so let the next mark drop it again. */
+    gid_app_marked = 0;
 
     for (i = 0; i < gid_hist_used; i++) {
         if (strncmp(gid_hist[i], gameid_in, GAME_ID_BUF_LEN) == 0) {
@@ -102,6 +114,34 @@ void gid_hist_push(const char *gameid_in) {
     strncpy(gid_hist[0], gameid_in, GAME_ID_BUF_LEN - 1);
 
     printf("# %s: %s\n", __FUNCTION__, gid_hist[0]);
+}
+
+/* Running the companion app is a launch like any other, so its own id lands at
+ * the top of the history every single time. Hardcoding it does not work: the id
+ * is derived from the executable, so it changes with every build of the app.
+ *
+ * The app announces itself by talking to us, though, and nothing else does.
+ * Whatever id is current the moment it first speaks is therefore the app's, and
+ * dropping that entry leaves a list of actual games. */
+void gid_hist_mark_app(void) {
+    uint32_t i;
+
+    if (gid_app_marked || !gid_hist_used) {
+        return;
+    }
+    gid_app_marked = 1;
+
+    if (strncmp(gid_hist[0], gameid, GAME_ID_BUF_LEN) != 0) {
+        return;
+    }
+
+    printf("# %s: %s is this app, dropping\n", __FUNCTION__, gid_hist[0]);
+
+    for (i = 0; i + 1 < gid_hist_used; i++) {
+        memcpy(gid_hist[i], gid_hist[i + 1], GAME_ID_BUF_LEN);
+    }
+    gid_hist_used--;
+    memset(gid_hist[gid_hist_used], 0, GAME_ID_BUF_LEN);
 }
 
 const char *gid_hist_get(uint32_t idx) {

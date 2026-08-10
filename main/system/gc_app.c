@@ -53,6 +53,11 @@ static volatile uint8_t mute_port = GC_APP_NO_DEV;
 #define GC_APP_MUTE_TIMEOUT_TICKS (30 * 100)
 static volatile uint32_t mute_ticks = 0;
 
+/* Set from the ISR when the app talks, acted on by the task. Identifying the
+ * app's own game id means reading gameid.c's storage, which is flash mapped and
+ * so out of reach from an interrupt. */
+static volatile uint8_t app_seen = 0;
+
 /* Generic axis indices, in the order the app expects them. */
 static const uint8_t gc_app_axis_idx[GC_APP_AXIS_CNT] = {
     AXIS_LX, AXIS_LY, AXIS_RX, AXIS_RY, TRIG_L, TRIG_R,
@@ -120,6 +125,7 @@ void IRAM_ATTR gc_app_input_read(uint8_t *out) {
      * holds the mute for minutes at a time, waiting on someone to press
      * buttons, and only sends a mode command at either end of that. */
     mute_ticks = 0;
+    app_seen = 1;
 
     for (uint32_t i = 0; i < GC_APP_INPUT_LEN; i++) {
         out[i] = input_snap[i];
@@ -263,6 +269,12 @@ static void gc_app_task(void *arg) {
                         (mute_port == GC_APP_NO_DEV) ? "off" : "on");
                     break;
             }
+        }
+
+        if (app_seen) {
+            /* Self guarding, so calling it every loop costs a comparison once
+             * the current id has been accounted for. */
+            gid_hist_mark_app();
         }
 
         if (mute_port != GC_APP_NO_DEV && ++mute_ticks > GC_APP_MUTE_TIMEOUT_TICKS) {
