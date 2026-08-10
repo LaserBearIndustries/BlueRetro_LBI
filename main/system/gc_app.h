@@ -26,7 +26,7 @@
 enum {
     GC_APP_MAP_BEGIN = 0,   /* [port]  start a fresh mapping for that port */
     GC_APP_MAP_SET,         /* [idx][src][dst][dst_id][max][thr][dz][turbo] */
-    GC_APP_MAP_COMMIT,      /* [count] apply and persist */
+    GC_APP_MAP_COMMIT,      /* [count][scope] apply and persist */
     GC_APP_MAP_CANCEL,      /* discard */
 };
 
@@ -49,7 +49,17 @@ void gc_app_input_update(uint8_t dev_id, struct wireless_ctrl *ctrl);
 /* True while that port's output is being held neutral for capture. */
 uint32_t gc_app_is_muted(uint8_t out_idx);
 
-/* All three called straight from the RMT ISR. */
+/* Scope byte on a commit. Mirrors CTRL_MAP_SCOPE_* in config.h. */
+#define GC_APP_SCOPE_GLOBAL 0
+#define GC_APP_SCOPE_GAME 1
+
+/* Current game id, handed back a slice at a time. Empty means no game has
+ * identified itself, so a per game profile cannot be saved. */
+#define GC_APP_GID_LEN 24
+#define GC_APP_GID_CHUNK 8
+
+/* All four called straight from the RMT ISR. */
+void gc_app_gameid(uint8_t chunk, uint8_t *out);
 void gc_app_input_read(uint8_t *out);
 void gc_app_map_cmd(const uint8_t *payload);
 void gc_app_mode_cmd(const uint8_t *payload);

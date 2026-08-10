@@ -17,6 +17,11 @@
 /* Per controller mappings are this prefix plus the address in hex. */
 #define CTRL_MAP_FILE_PFX "/fs/m_"
 
+/* Per game variant of the above. The game id is hashed rather than spelled
+ * out: ids run to 22 characters and SPIFFS names are capped at 31, which a
+ * bdaddr has already claimed half of. */
+#define CTRL_MAP_GAME_FILE_PFX "/fs/g"
+
 int32_t fs_init(void);
 void fs_reset(void);
 

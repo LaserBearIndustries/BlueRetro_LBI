@@ -247,11 +247,13 @@ static void bt_fb_task(void *param) {
                 case FB_TYPE_GAME_ID:
                     if (gid_update(fb_data)) {
                         config_init(GAMEID_CFG);
+                        bt_host_reload_ctrl_maps();
                     }
                     break;
                 case FB_TYPE_SYS_ID:
                     if (gid_update_sys(fb_data)) {
                         config_init(GAMEID_CFG);
+                        bt_host_reload_ctrl_maps();
                     }
                     break;
                 default:
@@ -545,6 +547,20 @@ const uint8_t *bt_host_dev_bdaddr(struct bt_dev *device) {
         return device->le_remote_bdaddr.a.val;
     }
     return device->remote_bdaddr;
+}
+
+/* A game id change reloads the whole config off the filesystem, which takes the
+ * mapping arrays with it and so throws away whatever profile each connected pad
+ * had loaded on connect. Put them back, and let the load pick up a profile made
+ * for the game that just started if there is one. */
+void bt_host_reload_ctrl_maps(void) {
+#ifdef CONFIG_BLUERETRO_CTRL_MAP
+    for (uint32_t i = 0; i < BT_MAX_DEV; i++) {
+        if (atomic_test_bit(&bt_dev[i].flags, BT_DEV_MAP_LOADED)) {
+            config_load_ctrl_map(bt_dev[i].ids.out_idx, bt_host_dev_bdaddr(&bt_dev[i]));
+        }
+    }
+#endif
 }
 
 int32_t bt_host_get_new_dev(struct bt_dev **device) {

@@ -64,6 +64,13 @@
 #define GC_APP_ST_ERROR 3
 #define GC_APP_ST_MUTED 0x80
 
+/* Which game is running, and which profile a save writes. */
+#define GC_APP_GID_CMD 0x2A
+#define GC_APP_GID_LEN 24
+#define GC_APP_GID_CHUNK 8
+#define GC_APP_SCOPE_GLOBAL 0
+#define GC_APP_SCOPE_GAME 1
+
 /* Debug log download. */
 #define GC_LOG_CMD 0x24
 #define GC_LOG_STATUS_CMD 0x25
@@ -683,6 +690,60 @@ static int trigger_mode_menu(void) {
 }
 
 /* Returns 1 if the user wants to map another controller. */
+static int app_get_gameid(int chan, char *out) {
+    static u8 req[32] ATTRIBUTE_ALIGN(32);
+    static u8 in[32] ATTRIBUTE_ALIGN(32);
+    int chunk;
+
+    memset(out, 0, GC_APP_GID_LEN + 1);
+
+    for (chunk = 0; chunk < GC_APP_GID_LEN / GC_APP_GID_CHUNK; chunk++) {
+        req[0] = GC_APP_GID_CMD;
+        req[1] = (u8)chunk;
+        memset(in, 0, sizeof(in));
+
+        if (si_xfer(chan, req, 2, in, GC_APP_GID_CHUNK) < 0) {
+            return -1;
+        }
+        memcpy(out + chunk * GC_APP_GID_CHUNK, in, GC_APP_GID_CHUNK);
+    }
+    out[GC_APP_GID_LEN] = 0;
+    return 0;
+}
+
+/* Only worth asking when a game has actually identified itself. Nothing
+ * sends a game id until one boots, so on the Swiss menu there is no choice
+ * to make and the question would just be noise. */
+static u8 scope_menu(const char *gameid) {
+    int sel = 0;
+
+    for (;;) {
+        u16 down;
+
+        printf("\x1b[2J\x1b[1;1H");
+        printf("Save this mapping for\n");
+        printf("=====================\n\n");
+        printf("   %s %s only\n", sel == 0 ? ">" : " ", gameid);
+        printf("   %s Every game\n", sel == 1 ? ">" : " ");
+        printf("\n  A per game profile wins over the general one when\n");
+        printf("  that game is running, and the general one is left\n");
+        printf("  alone either way.\n");
+        printf("\n  D-pad to choose, A to save.\n");
+
+        do {
+            down = pad_any_down();
+            VIDEO_WaitVSync();
+        } while (!down);
+
+        if (down & (PAD_BUTTON_UP | PAD_BUTTON_DOWN)) {
+            sel ^= 1;
+        }
+        if (down & PAD_BUTTON_A) {
+            return sel == 0 ? GC_APP_SCOPE_GAME : GC_APP_SCOPE_GLOBAL;
+        }
+    }
+}
+
 static int mapping_wizard(void) {
     struct map_entry map[64];
     u8 dev, st, args[8];
@@ -825,8 +886,20 @@ static int mapping_wizard(void) {
             goto cancelled;
         }
     }
-    args[0] = (u8)n;
-    app_map_send(chan, GC_APP_MAP_COMMIT, args, 1);
+    {
+        char gameid[GC_APP_GID_LEN + 1];
+        u8 scope = GC_APP_SCOPE_GLOBAL;
+
+        if (app_get_gameid(chan, gameid) == 0 && gameid[0]) {
+            pad_settle();
+            scope = scope_menu(gameid);
+            si_grab();
+        }
+
+        args[0] = (u8)n;
+        args[1] = scope;
+        app_map_send(chan, GC_APP_MAP_COMMIT, args, 2);
+    }
 
     st = GC_APP_ST_BUSY;
     for (tries = 0; tries < 300; tries++) {

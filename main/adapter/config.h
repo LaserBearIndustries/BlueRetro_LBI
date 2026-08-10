@@ -107,7 +107,14 @@ void config_init(uint32_t src);
 void config_update(uint32_t dst);
 uint32_t config_get_src(void);
 int32_t config_load_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr);
-int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr);
+/* scope picks which profile is written: this game, or every game. */
+enum {
+    CTRL_MAP_SCOPE_GLOBAL = 0,
+    CTRL_MAP_SCOPE_GAME,
+};
+
+int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr, uint32_t scope);
+uint32_t config_ctrl_map_is_game(uint32_t out_idx);
 void config_debug_log(void);
 
 #endif /* _CONFIG_H_ */

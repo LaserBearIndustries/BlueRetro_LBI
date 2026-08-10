@@ -575,12 +575,49 @@ struct ctrl_map_hdr {
     uint8_t reserved[2];
 } __packed;
 
-static void ctrl_map_filename(char *out, uint32_t len, const uint8_t *bdaddr) {
-    snprintf(out, len, "%s%02X%02X%02X%02X%02X%02X", CTRL_MAP_FILE_PFX,
-        bdaddr[5], bdaddr[4], bdaddr[3], bdaddr[2], bdaddr[1], bdaddr[0]);
+/* FNV-1a. Only needs to separate a handful of games from each other, and a
+ * collision costs a wrong mapping that remapping fixes, so 32 bits is ample
+ * and it keeps the name inside the SPIFFS limit. */
+static uint32_t gid_hash(const char *str) {
+    uint32_t hash = 2166136261u;
+
+    while (*str) {
+        hash ^= (uint8_t)*str++;
+        hash *= 16777619u;
+    }
+    return hash;
 }
 
-int32_t config_load_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr) {
+/* Returns -1 when a per game name was asked for and no game is known. */
+static int32_t ctrl_map_filename(char *out, uint32_t len, const uint8_t *bdaddr,
+        uint32_t scope) {
+    if (scope == CTRL_MAP_SCOPE_GAME) {
+        const char *gameid = gid_get();
+
+        if (!strlen(gameid)) {
+            return -1;
+        }
+        snprintf(out, len, "%s%08lX_%02X%02X%02X%02X%02X%02X",
+            CTRL_MAP_GAME_FILE_PFX, (unsigned long)gid_hash(gameid),
+            bdaddr[5], bdaddr[4], bdaddr[3], bdaddr[2], bdaddr[1], bdaddr[0]);
+        return 0;
+    }
+
+    snprintf(out, len, "%s%02X%02X%02X%02X%02X%02X", CTRL_MAP_FILE_PFX,
+        bdaddr[5], bdaddr[4], bdaddr[3], bdaddr[2], bdaddr[1], bdaddr[0]);
+    return 0;
+}
+
+/* Which scope the map currently on a port came from, so the app can say so and
+ * default the next save to the same place. */
+static uint8_t ctrl_map_scope[WIRED_MAX_DEV] = {0};
+
+uint32_t config_ctrl_map_is_game(uint32_t out_idx) {
+    return (out_idx < WIRED_MAX_DEV) ? ctrl_map_scope[out_idx] : 0;
+}
+
+static int32_t config_load_ctrl_map_scope(uint32_t out_idx, const uint8_t *bdaddr,
+        uint32_t scope) {
     char filename[32];
     struct ctrl_map_hdr hdr;
     FILE *file;
@@ -589,7 +626,9 @@ int32_t config_load_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr) {
         return -1;
     }
 
-    ctrl_map_filename(filename, sizeof(filename), bdaddr);
+    if (ctrl_map_filename(filename, sizeof(filename), bdaddr, scope) < 0) {
+        return -1;
+    }
     file = fopen(filename, "rb");
     if (file == NULL) {
         /* Never mapped, so whatever the port already has stands. */
@@ -620,12 +659,24 @@ int32_t config_load_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr) {
         config.in_cfg[out_idx].map_cfg[i].dst_id = out_idx;
     }
 
+    ctrl_map_scope[out_idx] = (scope == CTRL_MAP_SCOPE_GAME) ? 1 : 0;
+
     printf("# %s: %s -> port %lu, %u entries\n", __FUNCTION__, filename,
         out_idx, hdr.map_size);
     return 0;
 }
 
-int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr) {
+/* A profile made for the game that is running beats the one made for the pad in
+ * general, so try that first and fall back. Nothing here writes the fallback,
+ * so a game specific profile never shadows the general one permanently. */
+int32_t config_load_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr) {
+    if (config_load_ctrl_map_scope(out_idx, bdaddr, CTRL_MAP_SCOPE_GAME) == 0) {
+        return 0;
+    }
+    return config_load_ctrl_map_scope(out_idx, bdaddr, CTRL_MAP_SCOPE_GLOBAL);
+}
+
+int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr, uint32_t scope) {
     char filename[32];
     struct ctrl_map_hdr hdr = {
         .magic = CTRL_MAP_MAGIC,
@@ -645,7 +696,10 @@ int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr) {
     }
     hdr.map_size = (uint8_t)cnt;
 
-    ctrl_map_filename(filename, sizeof(filename), bdaddr);
+    if (ctrl_map_filename(filename, sizeof(filename), bdaddr, scope) < 0) {
+        printf("# %s: no game id, cannot save a per game profile\n", __FUNCTION__);
+        return -1;
+    }
     file = fopen(filename, "wb");
     if (file == NULL) {
         printf("# %s: failed to open %s for writing\n", __FUNCTION__, filename);
@@ -660,6 +714,8 @@ int32_t config_save_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr) {
         return -1;
     }
     fclose(file);
+
+    ctrl_map_scope[out_idx] = (scope == CTRL_MAP_SCOPE_GAME) ? 1 : 0;
 
     printf("# %s: %s saved, %lu entries\n", __FUNCTION__, filename, cnt);
     return 0;

@@ -72,6 +72,9 @@
 #define GC_BOOT_VER_CMD 0x28
 #define GC_BOOT_SEL_CMD 0x29
 
+/* Which game is running, so a mapping can be saved against it. */
+#define GC_APP_GID_CMD 0x2A
+
 #define RMT_MEM_ITEM_NUM SOC_RMT_MEM_WORDS_PER_CHANNEL
 
 typedef struct {
@@ -317,6 +320,18 @@ static void nsi_app_mode_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     RMT.conf_ch[channel].conf1.rx_en = 1;
 
     gc_app_mode_cmd(buf);
+}
+
+static void nsi_app_gid_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    uint8_t crc;
+    uint8_t chunk;
+
+    nsi_items_to_bytes(item, buf, 1);
+    chunk = buf[0];
+
+    gc_app_gameid(chunk, buf);
+    nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, GC_APP_GID_CHUNK, &crc, STOP_BIT_2US);
+    RMT.conf_ch[channel].conf1.tx_start = 1;
 }
 #endif
 
@@ -596,6 +611,9 @@ static void gc_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
         case GC_APP_MODE_CMD:
             nsi_app_mode_hdlr(channel, port, item);
             break;
+        case GC_APP_GID_CMD:
+            nsi_app_gid_hdlr(channel, port, item);
+            break;
 #endif
 #ifdef CONFIG_BLUERETRO_GC_LOG
         case GC_LOG_CMD:
@@ -668,6 +686,9 @@ static void gc_pad_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
             break;
         case GC_APP_MODE_CMD:
             nsi_app_mode_hdlr(channel, port, item);
+            break;
+        case GC_APP_GID_CMD:
+            nsi_app_gid_hdlr(channel, port, item);
             break;
 #endif
 #ifdef CONFIG_BLUERETRO_GC_LOG
