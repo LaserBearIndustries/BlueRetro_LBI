@@ -41,7 +41,10 @@ static uint8_t ota_buf[GC_OTA_CHUNK];
  * read it out of the app descriptor directly: that lives in flash mapped memory
  * and cache is disabled while a flush is in progress. */
 static uint8_t ota_ver[GC_OTA_VER_LEN];
-static uint8_t ota_name[GC_OTA_NAME_LEN];
+
+/* '1' or '2', or 0 if the project name did not say. One byte, deliberately;
+ * see the note in gc_ota.h. */
+static uint8_t ota_hw;
 
 /* Task side only. */
 static esp_ota_handle_t ota_hdl = 0;
@@ -101,25 +104,30 @@ void IRAM_ATTR gc_ota_status(uint8_t *status) {
     status[2] = GC_OTA_PROTO_VER;
 }
 
-/* Chunks 0-3 are the version, 4-7 the project name. Out of range chunks
- * return zeros, which is what firmware without a name did for every chunk
- * past the version, so an all zero name reads as "this adapter cannot say"
- * rather than as an answer. */
+/* Chunks 0-3 are the version. Chunk 4 is the board, spelled out here rather
+ * than stored: the characters are immediates, so this reads no flash and is
+ * safe from an interrupt with the cache disabled, which is exactly when the
+ * console is most likely to ask - during an update.
+ *
+ * Anything else returns zeros, which is what firmware without a board did for
+ * every chunk past the version, so an all zero answer reads as "this adapter
+ * cannot say" rather than as an answer. */
 void IRAM_ATTR gc_ota_version(uint8_t chunk, uint8_t *out) {
-    const uint8_t *src = ota_ver;
-    uint32_t len = GC_OTA_VER_LEN;
-    uint32_t off;
+    uint32_t off = (uint32_t)chunk * GC_OTA_VER_CHUNK;
 
-    if (chunk >= GC_OTA_NAME_CHUNK0) {
-        chunk -= GC_OTA_NAME_CHUNK0;
-        src = ota_name;
-        len = GC_OTA_NAME_LEN;
+    if (chunk == GC_OTA_NAME_CHUNK0) {
+        out[0] = 'h';
+        out[1] = 'w';
+        out[2] = ota_hw;
+
+        for (uint32_t i = 3; i < GC_OTA_VER_CHUNK; i++) {
+            out[i] = 0;
+        }
+        return;
     }
 
-    off = (uint32_t)chunk * GC_OTA_VER_CHUNK;
-
     for (uint32_t i = 0; i < GC_OTA_VER_CHUNK; i++) {
-        out[i] = ((off + i) < len) ? src[off + i] : 0;
+        out[i] = ((off + i) < GC_OTA_VER_LEN) ? ota_ver[off + i] : 0;
     }
 }
 
@@ -195,11 +203,28 @@ void gc_ota_init(void) {
     const esp_app_desc_t *desc = esp_app_get_description();
 
     memset(ota_ver, 0, sizeof(ota_ver));
-    memset(ota_name, 0, sizeof(ota_name));
+    ota_hw = 0;
+
     if (desc) {
         memcpy(ota_ver, desc->version, sizeof(ota_ver));
-        memcpy(ota_name, desc->project_name, sizeof(ota_name));
+
+        /* Pick the digit out of BlueRetro_hw2_gamecube once, here, where
+         * reading flash is fine and there is a whole task's stack to do it
+         * on. */
+        for (uint32_t i = 0; i + 2 < sizeof(desc->project_name); i++) {
+            if (desc->project_name[i] == 'h' && desc->project_name[i + 1] == 'w') {
+                ota_hw = (uint8_t)desc->project_name[i + 2];
+                break;
+            }
+        }
     }
 
-    xTaskCreatePinnedToCore(gc_ota_task, "gc_ota_task", 4096, NULL, 5, NULL, 0);
+    /* 3072 rather than 4096, measured rather than guessed: 388 bytes used at idle, but runs the flash writes.
+     *
+     * These four tasks were given 4096 each without measuring, which is 16 KB
+     * of heap against upstream's 13.5 KB for every task it has. Meanwhile
+     * hid_parser could not find 788 contiguous bytes to parse a controller's
+     * descriptor, and silently gave up - so the pad paired and did nothing.
+     * See the heap notes in adapter.h. */
+    xTaskCreatePinnedToCore(gc_ota_task, "gc_ota_task", 3072, NULL, 5, NULL, 0);
 }

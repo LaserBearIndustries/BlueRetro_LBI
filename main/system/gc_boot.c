@@ -157,5 +157,12 @@ void gc_boot_init(void) {
     printf("# %s: running slot %u, valid mask 0x%02X\n", __FUNCTION__,
         boot_running, boot_valid_mask);
 
-    xTaskCreatePinnedToCore(gc_boot_task, "gc_boot_task", 4096, NULL, 5, NULL, 0);
+    /* 3072 rather than 4096, measured rather than guessed: 460 bytes used at idle, but calls esp_ota_set_boot_partition.
+     *
+     * These four tasks were given 4096 each without measuring, which is 16 KB
+     * of heap against upstream's 13.5 KB for every task it has. Meanwhile
+     * hid_parser could not find 788 contiguous bytes to parse a controller's
+     * descriptor, and silently gave up - so the pad paired and did nothing.
+     * See the heap notes in adapter.h. */
+    xTaskCreatePinnedToCore(gc_boot_task, "gc_boot_task", 3072, NULL, 5, NULL, 0);
 }

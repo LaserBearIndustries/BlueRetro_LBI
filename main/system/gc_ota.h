@@ -21,18 +21,24 @@
 #define GC_OTA_VER_LEN 32
 #define GC_OTA_VER_CHUNK 8
 
-/* The project name, from esp_app_desc_t::project_name, which is
- * "BlueRetro" with the hardware and system appended - BlueRetro_hw2_gamecube.
- * It is the only thing the adapter knows about itself that says which
- * hardware it is, and the console needs that to refuse an image built for
- * the other one.
+/* Which board this is, as the string "hw1" or "hw2", so the console can
+ * refuse an image built for the other one. Taken from
+ * esp_app_desc_t::project_name, which CMakeLists builds as
+ * BlueRetro$ENV{BR_HW}$ENV{BR_SYS} and is the only thing the running
+ * firmware knows about its own hardware.
  *
- * Served through the existing version command rather than a new opcode, as
- * chunks 4 to 7. Firmware that predates this returns zeros for those chunks
- * already - the handler bounds checks against GC_OTA_VER_LEN - so an empty
- * name means old firmware rather than an unnamed one, and no console has to
- * guess which case it is looking at. */
-#define GC_OTA_NAME_LEN 32
+ * Served through the existing version command as chunk 4, rather than a new
+ * opcode. Firmware that predates this returns zeros for that chunk already -
+ * the handler bounds checks against GC_OTA_VER_LEN - so an empty answer means
+ * old firmware rather than an unnamed board, and no console has to guess
+ * which case it is looking at.
+ *
+ * Held as a single digit rather than a copy of the name, and rebuilt into
+ * text when asked. A 32 byte copy of the project name cost 32 bytes of .bss,
+ * which moved the heap boundary by exactly enough that hid_parser could no
+ * longer allocate its two report buffers - so controllers paired, their
+ * descriptors were never parsed, and nothing reached the console at all.
+ * There is no headroom here to spend. */
 #define GC_OTA_NAME_CHUNK0 4
 
 /* 2 adds the project name. 1 is still answered, and still spoken by every

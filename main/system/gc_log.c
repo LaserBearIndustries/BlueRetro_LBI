@@ -100,5 +100,12 @@ static void gc_log_task(void *arg) {
 }
 
 void gc_log_init(void) {
-    xTaskCreatePinnedToCore(gc_log_task, "gc_log_task", 4096, NULL, 5, NULL, 0);
+    /* 2048 rather than 4096, measured rather than guessed: 420 bytes used at idle.
+     *
+     * These four tasks were given 4096 each without measuring, which is 16 KB
+     * of heap against upstream's 13.5 KB for every task it has. Meanwhile
+     * hid_parser could not find 788 contiguous bytes to parse a controller's
+     * descriptor, and silently gave up - so the pad paired and did nothing.
+     * See the heap notes in adapter.h. */
+    xTaskCreatePinnedToCore(gc_log_task, "gc_log_task", 2048, NULL, 5, NULL, 0);
 }
