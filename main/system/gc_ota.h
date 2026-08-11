@@ -21,7 +21,23 @@
 #define GC_OTA_VER_LEN 32
 #define GC_OTA_VER_CHUNK 8
 
-#define GC_OTA_PROTO_VER 1
+/* The project name, from esp_app_desc_t::project_name, which is
+ * "BlueRetro" with the hardware and system appended - BlueRetro_hw2_gamecube.
+ * It is the only thing the adapter knows about itself that says which
+ * hardware it is, and the console needs that to refuse an image built for
+ * the other one.
+ *
+ * Served through the existing version command rather than a new opcode, as
+ * chunks 4 to 7. Firmware that predates this returns zeros for those chunks
+ * already - the handler bounds checks against GC_OTA_VER_LEN - so an empty
+ * name means old firmware rather than an unnamed one, and no console has to
+ * guess which case it is looking at. */
+#define GC_OTA_NAME_LEN 32
+#define GC_OTA_NAME_CHUNK0 4
+
+/* 2 adds the project name. 1 is still answered, and still spoken by every
+ * adapter in the field, so the console has to cope with both. */
+#define GC_OTA_PROTO_VER 2
 
 /* Sub command, carried in the first payload byte. */
 enum {
