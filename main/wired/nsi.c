@@ -147,6 +147,12 @@ static volatile rmt_symbol_word_t *rmt_items = (volatile rmt_symbol_word_t *)RMT
 static uint8_t buf[128] = {0};
 static uint32_t *buf32 = (uint32_t *)buf;
 static uint16_t *buf16 = (uint16_t *)buf;
+/* How many RMT errors a channel has reported since it last received
+ * anything. Only used to stop the log filling up; see the error case in
+ * the interrupt handlers. Eight because that is how many RMT channels the
+ * ESP32 has. */
+static uint8_t rmt_err_cnt[8] = {0};
+
 static uint8_t last_rumble[4] = {0};
 static uint8_t rumble_state[4] = {0};
 static uint8_t ctrl_acc_mode[4] = {0};
@@ -996,6 +1002,7 @@ static unsigned n64_isr(unsigned cause) {
             /* RX End */
             case 1:
                 //ets_printf("RX_END\n");
+                rmt_err_cnt[channel] = 0;
                 RMT.conf_ch[channel].conf1.rx_en = 0;
                 RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_SW;
                 RMT.conf_ch[channel].conf1.mem_wr_rst = 1;
@@ -1033,8 +1040,38 @@ static unsigned n64_isr(unsigned cause) {
                 break;
             /* Error */
             case 2:
-                ets_printf("ERR\n");
-                RMT.int_ena.val &= (~(BIT(i)));
+                /* Re-arm the channel rather than switch it off.
+                 *
+                 * This used to mask the channel's error interrupt and stop
+                 * there. TX and RX end stayed enabled, so it looked harmless,
+                 * but nothing re-armed the receiver: only the TX end path sets
+                 * rx_en, and an error produces no reply to transmit. So the
+                 * port stopped receiving, and having masked the error it never
+                 * said so again. One transient and that port was dead until the
+                 * next power cycle while the others carried on - which is a
+                 * miserable thing to be told about second hand.
+                 *
+                 * The same sequence the RX and TX end paths use between them:
+                 * stop receiving, take the memory back, reset the write
+                 * pointer, hand it over and receive again. The console retries
+                 * of its own accord, so a port that recovers by itself costs
+                 * one dropped poll. */
+                RMT.conf_ch[channel].conf1.rx_en = 0;
+                RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_SW;
+                RMT.conf_ch[channel].conf1.mem_wr_rst = 1;
+                RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_HW;
+                RMT.conf_ch[channel].conf1.rx_en = 1;
+
+                /* The recovery above is a handful of register writes. The
+                 * printing is what costs: ets_printf blocks in the interrupt
+                 * until the UART drains. So say the first few per channel and
+                 * then stay quiet, rather than turning a noisy line into a
+                 * starved CPU. The count clears on the next good receive, so a
+                 * channel that recovers can report again later. */
+                if (rmt_err_cnt[channel] < 4) {
+                    rmt_err_cnt[channel]++;
+                    ets_printf("ERR ch%d\n", channel);
+                }
                 break;
             default:
                 break;
@@ -1068,6 +1105,7 @@ static unsigned gc_isr(unsigned cause) {
             /* RX End */
             case 1:
                 //ets_printf("RX_END\n");
+                rmt_err_cnt[channel] = 0;
                 RMT.conf_ch[channel].conf1.rx_en = 0;
                 RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_SW;
                 RMT.conf_ch[channel].conf1.mem_wr_rst = 1;
@@ -1083,8 +1121,38 @@ static unsigned gc_isr(unsigned cause) {
                 break;
             /* Error */
             case 2:
-                ets_printf("ERR\n");
-                RMT.int_ena.val &= (~(BIT(i)));
+                /* Re-arm the channel rather than switch it off.
+                 *
+                 * This used to mask the channel's error interrupt and stop
+                 * there. TX and RX end stayed enabled, so it looked harmless,
+                 * but nothing re-armed the receiver: only the TX end path sets
+                 * rx_en, and an error produces no reply to transmit. So the
+                 * port stopped receiving, and having masked the error it never
+                 * said so again. One transient and that port was dead until the
+                 * next power cycle while the others carried on - which is a
+                 * miserable thing to be told about second hand.
+                 *
+                 * The same sequence the RX and TX end paths use between them:
+                 * stop receiving, take the memory back, reset the write
+                 * pointer, hand it over and receive again. The console retries
+                 * of its own accord, so a port that recovers by itself costs
+                 * one dropped poll. */
+                RMT.conf_ch[channel].conf1.rx_en = 0;
+                RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_SW;
+                RMT.conf_ch[channel].conf1.mem_wr_rst = 1;
+                RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_HW;
+                RMT.conf_ch[channel].conf1.rx_en = 1;
+
+                /* The recovery above is a handful of register writes. The
+                 * printing is what costs: ets_printf blocks in the interrupt
+                 * until the UART drains. So say the first few per channel and
+                 * then stay quiet, rather than turning a noisy line into a
+                 * starved CPU. The count clears on the next good receive, so a
+                 * channel that recovers can report again later. */
+                if (rmt_err_cnt[channel] < 4) {
+                    rmt_err_cnt[channel]++;
+                    ets_printf("ERR ch%d\n", channel);
+                }
                 break;
             default:
                 break;
