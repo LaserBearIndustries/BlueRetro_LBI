@@ -35,6 +35,20 @@ static struct map_cfg stage[ADAPTER_MAPPING_MAX];
 static volatile uint8_t stage_port = 0;
 static volatile uint8_t stage_cnt = 0;
 static volatile uint8_t stage_scope = GC_APP_SCOPE_GLOBAL;
+
+/* Which entries have actually been set since the last begin.
+ *
+ * stage[] is not cleared on begin, and commit was told how many entries to
+ * take rather than being able to see how many arrived. A single lost SI
+ * transfer therefore left whatever was in that slot before - a stale entry
+ * from an older mapping - and it was committed as if it were the new one.
+ *
+ * That is exactly what happened: the last six entries of a 33 entry mapping
+ * went missing, and since the app appends the combos last, what was lost was
+ * SYS_RESET, BT_INQUIRY, SYS_POWER_OFF, FACTORY_RESET, DEEP_SLEEP and
+ * WIRED_RST. Holding the base combo could then never match anything, so every
+ * gesture stopped working on every controller, with nothing said. */
+static volatile uint32_t stage_seen[ADAPTER_MAPPING_MAX / 32];
 static volatile uint8_t map_status = GC_APP_ST_IDLE;
 
 /* DRAM copy of the recent game ids, refreshed by the task. The ISR cannot read
@@ -162,6 +176,11 @@ void IRAM_ATTR gc_app_map_cmd(const uint8_t *payload) {
                 stage_port = payload[1];
                 stage_cnt = 0;
                 map_status = GC_APP_ST_IDLE;
+
+                for (uint32_t i = 0;
+                        i < sizeof(stage_seen) / sizeof(stage_seen[0]); i++) {
+                    stage_seen[i] = 0;
+                }
             }
             break;
         case GC_APP_MAP_SET:
@@ -175,6 +194,8 @@ void IRAM_ATTR gc_app_map_cmd(const uint8_t *payload) {
                 stage[idx].perc_deadzone = payload[7];
                 stage[idx].turbo = payload[8];
                 stage[idx].algo = 0;
+                stage_seen[idx / 32] |= (1UL << (idx % 32));
+
                 if (idx >= stage_cnt) {
                     stage_cnt = idx + 1;
                 }
@@ -230,7 +251,26 @@ static void gc_app_task(void *arg) {
                     uint8_t port = stage_port;
                     uint8_t cnt = stage_cnt;
 
-                    if (port < WIRED_MAX_DEV && cnt <= ADAPTER_MAPPING_MAX) {
+                    /* Every entry the app says it sent has to have arrived.
+                     * Committing a mapping with a hole in it is worse than
+                     * refusing: the hole is filled by whatever an older
+                     * mapping left there, so it looks like it worked. */
+                    int32_t missing = -1;
+
+                    for (uint32_t i = 0; i < cnt; i++) {
+                        if (!(stage_seen[i / 32] & (1UL << (i % 32)))) {
+                            missing = (int32_t)i;
+                            break;
+                        }
+                    }
+
+                    if (missing >= 0) {
+                        map_status = GC_APP_ST_ERROR;
+                        printf("# %s: port %u commit refused, entry %ld of %u "
+                            "never arrived\n", __FUNCTION__, port,
+                            (long)missing, cnt);
+                    }
+                    else if (port < WIRED_MAX_DEV && cnt <= ADAPTER_MAPPING_MAX) {
                         memcpy(config.in_cfg[port].map_cfg, stage,
                             cnt * sizeof(struct map_cfg));
                         config.in_cfg[port].map_size = cnt;
