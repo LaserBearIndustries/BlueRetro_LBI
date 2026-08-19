@@ -296,7 +296,15 @@ static void bt_host_task(void *param) {
             if (device->sdp_tx_wait && --device->sdp_tx_wait == 0
                     && atomic_test_bit(&device->flags, BT_DEV_DEVICE_FOUND)
                     && !atomic_test_bit(&device->flags, BT_DEV_SDP_TX_SENT)) {
+                /* Both, the way hci.c does it. printf goes to the UART,
+                 * and an adapter inside a console has nothing attached to
+                 * that - the debug trace is the only way this is ever
+                 * read, and it carries what bt_mon_log is given and
+                 * nothing else. A note about a fallback firing is worth
+                 * little if it lands somewhere nobody can see. */
                 printf("# dev: %ld SDP config half done, asking anyway\n",
+                    device->ids.id);
+                bt_mon_log(true, "dev: %ld SDP config half done, asking anyway\n",
                     device->ids.id);
                 bt_l2cap_sdp_query(device);
             }
