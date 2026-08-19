@@ -156,6 +156,52 @@ void bt_l2cap_cmd_sdp_conn_req(void *bt_dev) {
     bt_l2cap_cmd_conn_req(device->acl_handle, get_tx_ident(), BT_L2CAP_PSM_SDP, device->sdp_tx_chan.scid);
 }
 
+/* Ask the device for its HID descriptor. Also reachable from the host
+ * task, which is why it is not static: see bt_l2cap_sdp_conf_done. */
+void bt_l2cap_sdp_query(void *bt_dev) {
+    struct bt_dev *device = (struct bt_dev *)bt_dev;
+    uint8_t cont = 0x00;
+
+    device->sdp_tx_wait = 0;
+    atomic_set_bit(&device->flags, BT_DEV_SDP_TX_SENT);
+    bt_sdp_cmd_svc_search_attr_req(device, &cont, 1);
+}
+
+/* One of the two config exchanges on the SDP channel has finished.
+ *
+ * L2CAP configures each direction separately, so there are two: the
+ * response to our request, and our response to theirs. The channel is not
+ * properly open until both are done, so the query goes on whichever
+ * completes second and this is a latch, not a counter.
+ *
+ * A RetroFighters BattlerGC Pro in xinput mode never sends the second one.
+ * It configures both HID channels correctly, opens the SDP channel, sends
+ * its own config request - and then never answers ours. The latch was
+ * therefore never tripped, the descriptor was never asked for, and every
+ * report it went on to send was dropped for having no report map, with the
+ * device otherwise looking connected and healthy.
+ *
+ * So the wait is bounded. The host task fires the query anyway once
+ * BT_SDP_CONF_WAIT has passed, on the grounds that a device which opened
+ * the channel and configured its own direction is a device that can be
+ * asked, whatever it thinks it is doing about ours. */
+static void bt_l2cap_sdp_conf_done(struct bt_dev *device) {
+    /* The timeout got there first, and a device that answers late should
+     * not cause a second query: the responses to it would be appended to
+     * the same buffer, behind the ones already parsed. */
+    if (atomic_test_bit(&device->flags, BT_DEV_SDP_TX_SENT)) {
+        return;
+    }
+
+    if (!atomic_test_bit(&device->flags, BT_DEV_SDP_TX_PENDING)) {
+        atomic_set_bit(&device->flags, BT_DEV_SDP_TX_PENDING);
+        device->sdp_tx_wait = BT_SDP_CONF_WAIT;
+        return;
+    }
+
+    bt_l2cap_sdp_query(device);
+}
+
 void bt_l2cap_cmd_hid_ctrl_conn_req(void *bt_dev) {
     struct bt_dev *device = (struct bt_dev *)bt_dev;
     printf("# %s\n", __FUNCTION__);
@@ -247,13 +293,7 @@ void bt_l2cap_sig_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt)
                     device->sdp_tx_chan.mtu = *(uint16_t *)&conf_req->data[2];
                 }
                 bt_l2cap_cmd_conf_rsp(device->acl_handle, rx_ident, device->sdp_tx_chan.dcid, device->sdp_tx_chan.mtu);
-                if (!atomic_test_bit(&device->flags, BT_DEV_SDP_TX_PENDING)) {
-                    atomic_set_bit(&device->flags, BT_DEV_SDP_TX_PENDING);
-                }
-                else {
-                    uint8_t cont = 0x00;
-                    bt_sdp_cmd_svc_search_attr_req(device, &cont, 1);
-                }
+                bt_l2cap_sdp_conf_done(device);
             }
             else if (conf_req->dcid == device->sdp_rx_chan.scid) {
                 if (conf_req->data[0] == BT_L2CAP_CONF_OPT_MTU && conf_req->data[1] == 2) {
@@ -299,13 +339,7 @@ void bt_l2cap_sig_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt)
                 if (conf_rsp->data[0] == BT_L2CAP_CONF_OPT_MTU && conf_rsp->data[1] == 2) {
                     device->sdp_tx_chan.mtu = *(uint16_t *)&conf_rsp->data[2];
                 }
-                if (!atomic_test_bit(&device->flags, BT_DEV_SDP_TX_PENDING)) {
-                    atomic_set_bit(&device->flags, BT_DEV_SDP_TX_PENDING);
-                }
-                else {
-                    uint8_t cont = 0x00;
-                    bt_sdp_cmd_svc_search_attr_req(device, &cont, 1);
-                }
+                bt_l2cap_sdp_conf_done(device);
             }
             else if (conf_rsp->scid == device->ctrl_chan.scid) {
                 if (conf_rsp->data[0] == BT_L2CAP_CONF_OPT_MTU && conf_rsp->data[1] == 2) {

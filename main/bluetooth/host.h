@@ -16,6 +16,13 @@
 #include "hidp/hidp.h"
 
 #define BT_MAX_RETRY 3
+
+/* Housekeeping ticks to wait for the second half of the SDP channel
+ * config before asking for the descriptor anyway. The task runs every
+ * 20 ms and a compliant device answers within a couple of them, so this
+ * is half a second: long enough that it never pre-empts a device that
+ * was merely slow, short enough not to be noticed. */
+#define BT_SDP_CONF_WAIT 25
 #define BT_SDP_DATA_SIZE 2048
 #define BT_PNP_DATA_SIZE 256
 
@@ -25,6 +32,7 @@ enum {
     BT_DEV_PAGE,
     BT_DEV_ENCRYPTION,
     BT_DEV_SDP_TX_PENDING,
+    BT_DEV_SDP_TX_SENT,
     BT_DEV_HID_CTRL_PENDING,
     BT_DEV_HID_INTR_PENDING,
     BT_DEV_HID_INTR_READY,
@@ -68,6 +76,7 @@ struct bt_dev {
     void *conn_timer_hdl;
     uint8_t tid;
     uint8_t hid_retry_cnt;
+    uint8_t sdp_tx_wait;
     const struct bt_name_type *name;
     union {
         struct {

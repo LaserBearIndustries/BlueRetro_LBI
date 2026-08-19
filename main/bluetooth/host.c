@@ -290,6 +290,17 @@ static void bt_host_task(void *param) {
             struct bt_dev *device = &bt_dev[i];
             struct bt_data *bt_data = &bt_adapter.data[i];
 
+            /* The second half of the SDP channel config never arrived.
+             * Ask anyway rather than wait for something that is not
+             * coming; see bt_l2cap_sdp_conf_done. */
+            if (device->sdp_tx_wait && --device->sdp_tx_wait == 0
+                    && atomic_test_bit(&device->flags, BT_DEV_DEVICE_FOUND)
+                    && !atomic_test_bit(&device->flags, BT_DEV_SDP_TX_SENT)) {
+                printf("# dev: %ld SDP config half done, asking anyway\n",
+                    device->ids.id);
+                bt_l2cap_sdp_query(device);
+            }
+
             /* Parse SDP data if available */
             if (atomic_test_bit(&device->flags, BT_DEV_DEVICE_FOUND)) {
                 if (atomic_test_bit(&device->flags, BT_DEV_SDP_DATA)) {
