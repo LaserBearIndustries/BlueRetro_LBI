@@ -22,6 +22,7 @@
 #include "att_cfg.h"
 #include "att_hid.h"
 #include "smp.h"
+#include "hidp/generic.h"
 #include "tools/util.h"
 #include "debug.h"
 #include "mon.h"
@@ -293,20 +294,33 @@ static void bt_host_task(void *param) {
             /* The second half of the SDP channel config never arrived.
              * Ask anyway rather than wait for something that is not
              * coming; see bt_l2cap_sdp_conf_done. */
+            /* Two stages on one countdown, told apart by whether the query
+             * has gone out: first the wait for the channel config to
+             * finish, then the wait for an answer. Running out of the
+             * second means SDP is not going to happen at all.
+             *
+             * Both notes go through bt_mon_log as well as printf. printf
+             * reaches the UART, and an adapter inside a console has
+             * nothing attached to it - the debug trace is the only way any
+             * of this is ever read, and it carries what bt_mon_log is
+             * given and nothing else. */
             if (device->sdp_tx_wait && --device->sdp_tx_wait == 0
-                    && atomic_test_bit(&device->flags, BT_DEV_DEVICE_FOUND)
-                    && !atomic_test_bit(&device->flags, BT_DEV_SDP_TX_SENT)) {
-                /* Both, the way hci.c does it. printf goes to the UART,
-                 * and an adapter inside a console has nothing attached to
-                 * that - the debug trace is the only way this is ever
-                 * read, and it carries what bt_mon_log is given and
-                 * nothing else. A note about a fallback firing is worth
-                 * little if it lands somewhere nobody can see. */
-                printf("# dev: %ld SDP config half done, asking anyway\n",
-                    device->ids.id);
-                bt_mon_log(true, "dev: %ld SDP config half done, asking anyway\n",
-                    device->ids.id);
-                bt_l2cap_sdp_query(device);
+                    && atomic_test_bit(&device->flags, BT_DEV_DEVICE_FOUND)) {
+                if (!atomic_test_bit(&device->flags, BT_DEV_SDP_TX_SENT)) {
+                    printf("# dev: %ld SDP config half done, asking anyway\n",
+                        device->ids.id);
+                    bt_mon_log(true, "dev: %ld SDP config half done, asking anyway\n",
+                        device->ids.id);
+                    bt_l2cap_sdp_query(device);
+                }
+                else {
+                    printf("# dev: %ld no SDP answer\n", device->ids.id);
+                    bt_mon_log(true, "dev: %ld no SDP answer\n", device->ids.id);
+
+                    if (bt_hid_generic_fallback_desc(device) == 0) {
+                        bt_hid_init(device);
+                    }
+                }
             }
 
             /* Parse SDP data if available */

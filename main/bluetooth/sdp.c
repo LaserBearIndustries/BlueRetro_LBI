@@ -257,6 +257,11 @@ void bt_sdp_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt) {
         case BT_SDP_SVC_SEARCH_ATTR_RSP:
         {
             struct bt_sdp_att_rsp *att_rsp = (struct bt_sdp_att_rsp *)bt_hci_acl_pkt->sdp_data;
+
+            /* It answered, so the fallback is off: a device that is talking
+             * gets to describe itself, however many more packets it takes. */
+            device->sdp_tx_wait = 0;
+
             uint8_t *sdp_data = bt_hci_acl_pkt->sdp_data + sizeof(struct bt_sdp_att_rsp);
             uint8_t *sdp_con_state = sdp_data + sys_be16_to_cpu(att_rsp->att_list_len);
             uint32_t free_len = BT_SDP_DATA_SIZE - bt_adapter.data[device->ids.id].base.sdp_len;

@@ -17,6 +17,7 @@ struct bt_hidp_generic_rumble {
 void bt_hid_cmd_generic_rumble(struct bt_dev *device, void *report);
 void bt_hid_generic_init(struct bt_dev *device);
 void bt_hid_generic_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt, uint32_t len);
+int32_t bt_hid_generic_fallback_desc(struct bt_dev *device);
 
 #endif /* _BT_HIDP_GENERIC_H_ */
 

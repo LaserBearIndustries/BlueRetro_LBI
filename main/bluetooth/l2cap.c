@@ -162,7 +162,10 @@ void bt_l2cap_sdp_query(void *bt_dev) {
     struct bt_dev *device = (struct bt_dev *)bt_dev;
     uint8_t cont = 0x00;
 
-    device->sdp_tx_wait = 0;
+    /* Re-armed rather than cleared: the same countdown now measures how
+     * long the answer takes, and running out of it a second time is what
+     * decides SDP is not going to happen at all. */
+    device->sdp_tx_wait = BT_SDP_RSP_WAIT;
     atomic_set_bit(&device->flags, BT_DEV_SDP_TX_SENT);
     bt_sdp_cmd_svc_search_attr_req(device, &cont, 1);
 }

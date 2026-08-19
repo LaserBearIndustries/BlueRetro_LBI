@@ -23,6 +23,11 @@
  * is half a second: long enough that it never pre-empts a device that
  * was merely slow, short enough not to be noticed. */
 #define BT_SDP_CONF_WAIT 25
+
+/* And then to wait for an answer to the query itself before giving up on
+ * SDP entirely and using a built in report map. Longer, because this one
+ * is a device thinking rather than a handshake that already stalled. */
+#define BT_SDP_RSP_WAIT 50
 #define BT_SDP_DATA_SIZE 2048
 #define BT_PNP_DATA_SIZE 256
 
