@@ -19,63 +19,54 @@
  * does exactly that: it opens the SDP channel, half configures it, ignores
  * the query that follows, and then streams perfectly good input forever.
  *
- * It calls itself an Xbox Wireless Controller and sends the layout that
- * goes with the name, so that is what this describes - taken from a trace
- * of the pad itself rather than from a datasheet:
+ * What it streams, read off a capture of the pad rather than a datasheet:
  *
- *   bytes 0-1   X      left stick, 16 bit, centred at 0x8000
+ *   bytes 0-1   X      left stick, full 16 bit range
  *   bytes 2-3   Y
- *   bytes 4-5   Z      right stick
- *   bytes 6-7   Rz
- *   bytes 8-9   Brake        left trigger, 10 bits in a 16 bit field
- *   bytes 10-11 Accelerator  right trigger
+ *   bytes 4-5   Rx     right stick
+ *   bytes 6-7   Ry
+ *   bytes 8-9   Z      left trigger, 0..1023 in a 16 bit field
+ *   bytes 10-11 Rz     right trigger
  *   byte  12    Hat    4 bits, 0 centred, 1-8 clockwise, then 4 padding
- *   bytes 13-14 Buttons 1-15, then 1 padding
+ *   bytes 13-14 Buttons 1-10, then 6 padding
  *
- * Those are the usages hid_generic.c already maps, which is the point of
- * describing it rather than writing another handler: a real Xbox pad
- * publishes the same shape over SDP, so everything downstream of here is
- * the path that already works for one.
+ * The order of those usages is not a style choice, it is the whole of
+ * whether the buttons come out right. hid_pad_init() picks between two
+ * button tables, and reaches for the xinput one only on an exact
+ * fingerprint: eight usages, being X, Y, Rx, Ry, Z, Rz, Hat, and a button
+ * range whose maximum is ten. The same list decides through z_is_joy that
+ * Z and Rz are triggers rather than a second stick.
+ *
+ * Describing it the other legal way - Z and Rz for the right stick, Brake
+ * and Accelerator for the triggers, fifteen buttons in the gapped Xbox One
+ * numbering - moves every axis to the right place and still puts Start on
+ * RS, because the fingerprint misses and the default button table applies.
+ * That was the first attempt, and it is why this comment is this long.
+ *
+ * The pad confirms the ten button numbering on the wire: it sets button 6,
+ * which the Xbox One layout leaves empty, and reports Start as button 8.
  */
 static const uint8_t xb1_fallback_hid_desc[] = {
     0x05, 0x01,                    /* Usage Page (Generic Desktop)      */
     0x09, 0x05,                    /* Usage (Game Pad)                  */
     0xA1, 0x01,                    /* Collection (Application)          */
     0x85, 0x01,                    /*   Report ID (1)                   */
-    0x09, 0x01,                    /*   Usage (Pointer)                 */
-    0xA1, 0x00,                    /*   Collection (Physical)           */
-    0x09, 0x30,                    /*     Usage (X)                     */
-    0x09, 0x31,                    /*     Usage (Y)                     */
-    0x15, 0x00,                    /*     Logical Minimum (0)           */
-    0x27, 0xFF, 0xFF, 0x00, 0x00,  /*     Logical Maximum (65535)       */
-    0x95, 0x02,                    /*     Report Count (2)              */
-    0x75, 0x10,                    /*     Report Size (16)              */
-    0x81, 0x02,                    /*     Input (Data,Var,Abs)          */
-    0xC0,                          /*   End Collection                  */
-    0x09, 0x01,                    /*   Usage (Pointer)                 */
-    0xA1, 0x00,                    /*   Collection (Physical)           */
-    0x09, 0x32,                    /*     Usage (Z)                     */
-    0x09, 0x35,                    /*     Usage (Rz)                    */
-    0x15, 0x00,                    /*     Logical Minimum (0)           */
-    0x27, 0xFF, 0xFF, 0x00, 0x00,  /*     Logical Maximum (65535)       */
-    0x95, 0x02,                    /*     Report Count (2)              */
-    0x75, 0x10,                    /*     Report Size (16)              */
-    0x81, 0x02,                    /*     Input (Data,Var,Abs)          */
-    0xC0,                          /*   End Collection                  */
-    0x05, 0x02,                    /*   Usage Page (Simulation)         */
-    0x09, 0xC5,                    /*   Usage (Brake)                   */
+    0x09, 0x30,                    /*   Usage (X)                       */
+    0x09, 0x31,                    /*   Usage (Y)                       */
+    0x09, 0x33,                    /*   Usage (Rx)                      */
+    0x09, 0x34,                    /*   Usage (Ry)                      */
+    0x15, 0x00,                    /*   Logical Minimum (0)             */
+    0x27, 0xFF, 0xFF, 0x00, 0x00,  /*   Logical Maximum (65535)         */
+    0x75, 0x10,                    /*   Report Size (16)                */
+    0x95, 0x04,                    /*   Report Count (4)                */
+    0x81, 0x02,                    /*   Input (Data,Var,Abs)            */
+    0x09, 0x32,                    /*   Usage (Z)                       */
+    0x09, 0x35,                    /*   Usage (Rz)                      */
     0x15, 0x00,                    /*   Logical Minimum (0)             */
     0x26, 0xFF, 0x03,              /*   Logical Maximum (1023)          */
-    0x95, 0x01,                    /*   Report Count (1)                */
     0x75, 0x10,                    /*   Report Size (16)                */
+    0x95, 0x02,                    /*   Report Count (2)                */
     0x81, 0x02,                    /*   Input (Data,Var,Abs)            */
-    0x09, 0xC4,                    /*   Usage (Accelerator)             */
-    0x15, 0x00,                    /*   Logical Minimum (0)             */
-    0x26, 0xFF, 0x03,              /*   Logical Maximum (1023)          */
-    0x95, 0x01,                    /*   Report Count (1)                */
-    0x75, 0x10,                    /*   Report Size (16)                */
-    0x81, 0x02,                    /*   Input (Data,Var,Abs)            */
-    0x05, 0x01,                    /*   Usage Page (Generic Desktop)    */
     0x09, 0x39,                    /*   Usage (Hat switch)              */
     0x15, 0x01,                    /*   Logical Minimum (1)             */
     0x25, 0x08,                    /*   Logical Maximum (8)             */
@@ -85,20 +76,20 @@ static const uint8_t xb1_fallback_hid_desc[] = {
     0x75, 0x04,                    /*   Report Size (4)                 */
     0x95, 0x01,                    /*   Report Count (1)                */
     0x81, 0x42,                    /*   Input (Data,Var,Abs,Null State) */
+    0x65, 0x00,                    /*   Unit (None)                     */
     0x75, 0x04,                    /*   Report Size (4)                 */
     0x95, 0x01,                    /*   Report Count (1)                */
-    0x65, 0x00,                    /*   Unit (None)                     */
     0x81, 0x03,                    /*   Input (Const,Var,Abs) - padding */
     0x05, 0x09,                    /*   Usage Page (Button)             */
     0x19, 0x01,                    /*   Usage Minimum (1)               */
-    0x29, 0x0F,                    /*   Usage Maximum (15)              */
+    0x29, 0x0A,                    /*   Usage Maximum (10)              */
     0x15, 0x00,                    /*   Logical Minimum (0)             */
     0x25, 0x01,                    /*   Logical Maximum (1)             */
     0x75, 0x01,                    /*   Report Size (1)                 */
-    0x95, 0x0F,                    /*   Report Count (15)               */
+    0x95, 0x0A,                    /*   Report Count (10)               */
     0x81, 0x02,                    /*   Input (Data,Var,Abs)            */
     0x75, 0x01,                    /*   Report Size (1)                 */
-    0x95, 0x01,                    /*   Report Count (1)                */
+    0x95, 0x06,                    /*   Report Count (6)                */
     0x81, 0x03,                    /*   Input (Const,Var,Abs) - padding */
     0xC0,                          /* End Collection                    */
 };

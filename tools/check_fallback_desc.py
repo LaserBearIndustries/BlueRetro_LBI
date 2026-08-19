@@ -26,17 +26,23 @@ SRC = os.path.join(HERE, '..', 'main', 'bluetooth', 'hidp', 'generic.c')
 # What the trace showed, and therefore what the descriptor has to say:
 # name, bit offset, bit size.
 WANT = [
-    ('X',      0,  16),
-    ('Y',     16,  16),
-    ('Z',     32,  16),
-    ('Rz',    48,  16),
-    ('Brake', 64,  16),
-    ('Accel', 80,  16),
-    ('Hat',   96,   4),
-    ('pad',  100,   4),
-    ('Btn',  104,  15),
-    ('pad',  119,   1),
+    ('X',     0,  16),
+    ('Y',    16,  16),
+    ('Rx',   32,  16),
+    ('Ry',   48,  16),
+    ('Z',    64,  16),
+    ('Rz',   80,  16),
+    ('Hat',  96,   4),
+    ('pad', 100,   4),
+    ('Btn', 104,  10),
+    ('pad', 114,   6),
 ]
+
+# The order hid_pad_init() fingerprints before it will use the xinput button
+# table. Getting the axes right and this wrong is not a small miss: every
+# button shifts, and Start comes out as RS.
+XINPUT_FINGERPRINT = ['X', 'Y', 'Rx', 'Ry', 'Z', 'Rz', 'Hat', 'Btn']
+XINPUT_BTN_MAX = 10
 
 USAGE = {
     (0x01, 0x30): 'X', (0x01, 0x31): 'Y', (0x01, 0x32): 'Z',
@@ -141,6 +147,24 @@ def main():
     if bad:
         print('\n%d problem%s' % (bad, '' if bad == 1 else 's'))
         return 1
+
+    # The fingerprint, which is what decides the button table.
+    real = [f[0] for f in fields if f[0] != 'pad']
+    if real != XINPUT_FINGERPRINT:
+        print('FAIL usages are %s' % real)
+        print('     xinput button table needs %s' % XINPUT_FINGERPRINT)
+        print('     without it hid_pad_init falls back to the default table')
+        return 1
+
+    btn = [f for f in fields if f[0] == 'Btn'][0]
+    if btn[2] != XINPUT_BTN_MAX:
+        print('FAIL %d buttons declared, the fingerprint needs exactly %d'
+              % (btn[2], XINPUT_BTN_MAX))
+        return 1
+
+    print('usages: %s' % ' '.join(real))
+    print('matches the fingerprint hid_pad_init wants for the xinput '
+          'button table.\n')
 
     for name, off, sz in fields:
         print('  %-6s bit %-4d size %-3d  byte %d' % (name, off, sz, off // 8))
