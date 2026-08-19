@@ -12,6 +12,9 @@
 #include "ps.h"
 #include "sw.h"
 #include "sw2.h"
+#ifdef CONFIG_BLUERETRO_GC_APP
+#include "system/gc_app.h"
+#endif
 
 typedef void (*bt_hid_init_t)(struct bt_dev *device);
 typedef void (*bt_hid_hdlr_t)(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt, uint32_t len);
@@ -92,6 +95,12 @@ void bt_hid_set_type_flags_from_name(struct bt_dev *device, const char* name) {
             bt_type_update(device->ids.id, bt_name_type[i].type, bt_name_type[i].subtype);
             bt_data->base.flags[PAD] = bt_name_type[i].hid_flags;
             device->name = &bt_name_type[i];
+#ifdef CONFIG_BLUERETRO_GC_APP
+            /* The matched label is what the app shows. Taken here because
+             * this is the one moment it is known, and copied there because
+             * this table is const and so lives in flash. */
+            gc_app_dev_name(device->ids.id, bt_name_type[i].name);
+#endif
             break;
         }
     }

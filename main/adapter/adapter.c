@@ -431,7 +431,7 @@ void adapter_bridge(struct bt_data *bt_data) {
 #ifdef CONFIG_BLUERETRO_GC_APP
         /* Snapshot before mapping: the app wants to know which button was
          * actually pressed, not what it currently maps to. */
-        gc_app_input_update(bt_data->base.pids->out_idx, ctrl_input);
+        gc_app_input_update(bt_data->base.pids, ctrl_input);
 
         /* While the app is capturing a mapping, the pad being remapped must not
          * also be driving the game. Stop short of the wired output; the app is

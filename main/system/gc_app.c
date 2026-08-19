@@ -55,6 +55,24 @@ static volatile uint8_t map_status = GC_APP_ST_IDLE;
  * gameid.c's storage, which is flash mapped and gone during an OTA write. */
 static char gid_snap[GID_HIST_MAX][GC_APP_GID_LEN] = {{0}};
 
+/* What is plugged in where.
+ *
+ * Two tables rather than one because the two halves arrive at different
+ * times and are keyed differently. The name is settled once, when the
+ * Bluetooth layer matches a remote name, and is keyed by Bluetooth device
+ * index; the port a device drives is decided later and can change, and is
+ * what the app asks about. Joining them at read time costs one indirection
+ * and saves copying a name on every controller report.
+ *
+ * All DRAM, for the reason above gid_snap: the ISR reads these, and the
+ * table the names come from is const and therefore in flash. */
+static char dev_name[BT_MAX_DEV][GC_APP_DEV_NAME_LEN] = {{0}};
+static volatile uint8_t dev_name_len[BT_MAX_DEV];
+
+static volatile int8_t dev_bt_id[WIRED_MAX_DEV];
+static volatile int8_t dev_type[WIRED_MAX_DEV];
+static volatile uint8_t dev_subtype[WIRED_MAX_DEV];
+
 enum {
     GC_APP_REQ_NONE = 0,
     GC_APP_REQ_COMMIT,
@@ -108,12 +126,80 @@ static int8_t axis_to_int8(struct ctrl_axis *axis) {
     return (int8_t)val;
 }
 
-void gc_app_input_update(uint8_t dev_id, struct wireless_ctrl *ctrl) {
+/* Task context, called once when the Bluetooth layer settles what this
+ * device is. The length is measured here so that the reader below never
+ * has to. */
+void gc_app_dev_name(int32_t id, const char *name) {
+    uint32_t i;
+
+    if (id < 0 || id >= BT_MAX_DEV || name == NULL) {
+        return;
+    }
+
+    for (i = 0; i < GC_APP_DEV_NAME_LEN - 1 && name[i]; i++) {
+        dev_name[id][i] = name[i];
+    }
+    dev_name[id][i] = 0;
+    dev_name_len[id] = (uint8_t)i;
+}
+
+/* Served from the DRAM mirror, for the same reason as gc_app_gameid: this
+ * is reached from the ISR, and the name table it came from is const and so
+ * lives in flash, which is not there during an OTA write. Byte loops rather
+ * than memcpy and strlen, for the same reason again. */
+void IRAM_ATTR gc_app_dev_info(uint8_t dev, uint8_t chunk, uint8_t *out) {
+    uint32_t off, i;
+    int8_t id;
+
+    for (i = 0; i < GC_APP_DEV_CHUNK; i++) {
+        out[i] = 0;
+    }
+
+    if (dev >= WIRED_MAX_DEV || chunk >= GC_APP_DEV_CHUNKS) {
+        return;
+    }
+
+    id = dev_bt_id[dev];
+
+    if (chunk == 0) {
+        /* Offset by one so zero reads as "nothing there" rather than as
+         * BT_HID_GENERIC, which is genuinely zero. */
+        out[GC_APP_DEV_TYPE] = (uint8_t)(dev_type[dev] + 1);
+        out[GC_APP_DEV_SUBTYPE] = dev_subtype[dev];
+        out[GC_APP_DEV_NAMELEN] = (id >= 0 && id < BT_MAX_DEV)
+            ? dev_name_len[id] : 0;
+        return;
+    }
+
+    if (id < 0 || id >= BT_MAX_DEV) {
+        return;
+    }
+
+    off = (uint32_t)(chunk - 1) * GC_APP_DEV_CHUNK;
+
+    for (i = 0; i < GC_APP_DEV_CHUNK; i++) {
+        out[i] = ((off + i) < GC_APP_DEV_NAME_LEN)
+            ? (uint8_t)dev_name[id][off + i] : 0;
+    }
+}
+
+void gc_app_input_update(const struct bt_ids *ids, struct wireless_ctrl *ctrl) {
     uint8_t tmp[GC_APP_INPUT_LEN];
+    uint8_t dev_id;
     uint32_t btns;
 
-    if (ctrl == NULL) {
+    if (ctrl == NULL || ids == NULL) {
         return;
+    }
+
+    dev_id = (uint8_t)ids->out_idx;
+
+    /* Three stores on the report path. The name is not touched here; it is
+     * joined to this at read time through the Bluetooth index. */
+    if (ids->out_idx >= 0 && ids->out_idx < WIRED_MAX_DEV) {
+        dev_bt_id[ids->out_idx] = (int8_t)ids->id;
+        dev_type[ids->out_idx] = (int8_t)ids->type;
+        dev_subtype[ids->out_idx] = (uint8_t)ids->subtype;
     }
 
     btns = (uint32_t)ctrl->btns[0].value;
@@ -352,6 +438,12 @@ static void gc_app_task(void *arg) {
 }
 
 void gc_app_init(void) {
+    for (uint32_t i = 0; i < WIRED_MAX_DEV; i++) {
+        dev_bt_id[i] = -1;
+        dev_type[i] = -1;
+        dev_subtype[i] = 0;
+    }
+
     memset(stage, 0, sizeof(stage));
     /* 2048 rather than 4096, measured rather than guessed: services gc_cfg and gc_pair; 412 bytes used at idle.
      *

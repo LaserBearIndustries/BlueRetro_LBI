@@ -18,6 +18,33 @@
 /* Reported in the device field when nothing has been seen yet. */
 #define GC_APP_NO_DEV 0xFF
 
+/* What kind of controller is on a port.
+ *
+ * The name is the one the Bluetooth layer matched the remote name
+ * against, which is already a readable label - "Xbox Wireless
+ * Controller", "N64 Controller", "DualSense Wireless Controller". Sending
+ * the string rather than a table index keeps the two sides independent:
+ * inserting a row in that table would otherwise rename every controller
+ * for an app built before it.
+ *
+ * The type is sent as well because it is the only answer for a controller
+ * that matched no name at all, and because it is what separates a Switch
+ * Pro pad from an NSO one when both are BT_SW.
+ *
+ * Chunk 0 is the numbers, chunks 1 and up are the name, eight bytes at a
+ * time - the same shape as the game id read, and for the same reason: a
+ * GameCube SI reply does not hold more.
+ */
+#define GC_APP_DEV_CHUNK 8
+#define GC_APP_DEV_NAME_LEN 32
+#define GC_APP_DEV_CHUNKS (1 + GC_APP_DEV_NAME_LEN / GC_APP_DEV_CHUNK)
+
+/* Chunk 0 layout. Type is offset by one so that zero means "nothing is
+ * connected there", which is distinct from BT_HID_GENERIC being zero. */
+#define GC_APP_DEV_TYPE 0
+#define GC_APP_DEV_SUBTYPE 1
+#define GC_APP_DEV_NAMELEN 2
+
 /* Number of axes reported, in this order:
  * AXIS_LX, AXIS_LY, AXIS_RX, AXIS_RY, TRIG_L, TRIG_R */
 #define GC_APP_AXIS_CNT 6
@@ -41,10 +68,25 @@ enum {
 #define GC_APP_ST_MUTED 0x80
 
 struct wireless_ctrl;
+struct bt_ids;
 
 /* Called from the Bluetooth side each time a report is decoded, before mapping
- * is applied. Cheap by design: it runs on every controller report. */
-void gc_app_input_update(uint8_t dev_id, struct wireless_ctrl *ctrl);
+ * is applied. Cheap by design: it runs on every controller report.
+ *
+ * Takes the whole id block rather than just the port, because the type and
+ * the Bluetooth device index are in it and both are wanted for the device
+ * report below. Recording them is three stores, which is cheap enough to do
+ * on every report; the name is not copied here. */
+void gc_app_input_update(const struct bt_ids *ids, struct wireless_ctrl *ctrl);
+
+/* Called once, from the Bluetooth side, when a remote name has been matched
+ * to a known controller. Copies the label into DRAM: the table it comes from
+ * is const, so it lives in flash, and the ISR that serves the read below
+ * cannot touch flash while an OTA has the cache turned off. */
+void gc_app_dev_name(int32_t id, const char *name);
+
+/* Straight from the RMT ISR. */
+void gc_app_dev_info(uint8_t dev, uint8_t chunk, uint8_t *out);
 
 /* True while that port's output is being held neutral for capture. */
 uint32_t gc_app_is_muted(uint8_t out_idx);

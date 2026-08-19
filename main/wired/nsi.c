@@ -88,6 +88,10 @@
 #define GC_PAIR_ENTRY_CMD 0x30
 #define GC_PAIR_CMD 0x31
 
+/* What kind of controller is on a port. After the pairing block because it
+ * was added later; the numbers are an allocation, not an ordering. */
+#define GC_APP_DEV_CMD 0x32
+
 #define RMT_MEM_ITEM_NUM SOC_RMT_MEM_WORDS_PER_CHANNEL
 
 typedef struct {
@@ -339,6 +343,21 @@ static void nsi_app_mode_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     RMT.conf_ch[channel].conf1.rx_en = 1;
 
     gc_app_mode_cmd(buf);
+}
+
+/* [cmd][port][chunk] in, one chunk of the device report out. Same shape as
+ * the game id read below it. */
+static void nsi_app_dev_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
+    uint8_t crc;
+    uint8_t dev, chunk;
+
+    nsi_items_to_bytes(item, buf, 2);
+    dev = buf[0];
+    chunk = buf[1];
+
+    gc_app_dev_info(dev, chunk, buf);
+    nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, GC_APP_DEV_CHUNK, &crc, STOP_BIT_2US);
+    RMT.conf_ch[channel].conf1.tx_start = 1;
 }
 
 static void nsi_app_gid_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
@@ -712,6 +731,9 @@ static void gc_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
         case GC_APP_GID_CMD:
             nsi_app_gid_hdlr(channel, port, item);
             break;
+        case GC_APP_DEV_CMD:
+            nsi_app_dev_hdlr(channel, port, item);
+            break;
 #endif
 #ifdef CONFIG_BLUERETRO_GC_LOG
         case GC_LOG_CMD:
@@ -812,6 +834,9 @@ static void gc_pad_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
             break;
         case GC_APP_GID_CMD:
             nsi_app_gid_hdlr(channel, port, item);
+            break;
+        case GC_APP_DEV_CMD:
+            nsi_app_dev_hdlr(channel, port, item);
             break;
 #endif
 #ifdef CONFIG_BLUERETRO_GC_LOG
