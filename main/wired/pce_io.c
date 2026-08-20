@@ -138,7 +138,7 @@ static void pce_ctrl_task(void) {
             }
             idx = ((cur_in1 & P1_SEL_MASK) >> 1) ^ 0x01;
 
-            GPIO.out = map[0][idx] | map_mask[0][idx];
+            GPIO.out.val = map[0][idx] | map_mask[0][idx];
             timeout = 0;
         }
     }
@@ -178,18 +178,18 @@ static void pce_mt_task(void) {
                     ++cycle;
                 }
                 if (frame_cnt & 0x01) {
-                    GPIO.out = PCE_OUT_CLR;
+                    GPIO.out.val = PCE_OUT_CLR;
                 }
                 else {
-                    GPIO.out = map[cycle][0] | map_mask[cycle][0];
+                    GPIO.out.val = map[cycle][0] | map_mask[cycle][0];
                 }
             }
             else {
                 if (frame_cnt & 0x01) {
-                    GPIO.out = map[cycle][2] | map_mask[cycle][2];
+                    GPIO.out.val = map[cycle][2] | map_mask[cycle][2];
                 }
                 else {
-                    GPIO.out = map[cycle][1] | map_mask[cycle][1];
+                    GPIO.out.val = map[cycle][1] | map_mask[cycle][1];
                 }
             }
             timeout = 0;
@@ -201,12 +201,12 @@ static unsigned pce_mt_oe_isr(unsigned cause) {
     uint32_t cur_in1 = GPIO.in1.val;
     cycle = 0;
     if (cur_in1 & P1_SEL_MASK) {
-        GPIO.out = map[cycle][0] | map_mask[cycle][0];
+        GPIO.out.val = map[cycle][0] | map_mask[cycle][0];
     }
     else {
-        GPIO.out = map[cycle][1] | map_mask[cycle][1];
+        GPIO.out.val = map[cycle][1] | map_mask[cycle][1];
     }
-    GPIO.status_w1tc = P1_OE_MASK;
+    GPIO.status_w1tc.val = P1_OE_MASK;
     return 0;
 }
 
@@ -216,21 +216,21 @@ static unsigned pce_6btns_oe_isr(unsigned cause) {
     ++frame_cnt;
     if (cur_in1 & P1_SEL_MASK) {
         if (frame_cnt & 0x01) {
-            GPIO.out = PCE_OUT_CLR;
+            GPIO.out.val = PCE_OUT_CLR;
         }
         else {
-            GPIO.out = map[cycle][0] | map_mask[cycle][0];
+            GPIO.out.val = map[cycle][0] | map_mask[cycle][0];
         }
     }
     else {
         if (frame_cnt & 0x01) {
-            GPIO.out = map[cycle][2] | map_mask[cycle][2];
+            GPIO.out.val = map[cycle][2] | map_mask[cycle][2];
         }
         else {
-            GPIO.out = map[cycle][1] | map_mask[cycle][1];
+            GPIO.out.val = map[cycle][1] | map_mask[cycle][1];
         }
     }
-    GPIO.status_w1tc = P1_OE_MASK;
+    GPIO.status_w1tc.val = P1_OE_MASK;
     return 0;
 }
 
@@ -265,11 +265,11 @@ static void pce_mouse_task(void) {
                     ++cycle;
                 }
                 if (mouse_cnt) {
-                    GPIO.out = axes[mouse_cnt - 1];
+                    GPIO.out.val = axes[mouse_cnt - 1];
                 }
             }
             else {
-                GPIO.out = map[0][2];
+                GPIO.out.val = map[0][2];
             }
             timeout = 0;
             if (mouse_cnt == 0) {
@@ -286,13 +286,13 @@ static unsigned pce_mouse_oe_isr(unsigned cause) {
     ++mouse_cnt;
     if (cur_in1 & P1_SEL_MASK) {
         if (mouse_cnt) {
-            GPIO.out = axes[mouse_cnt - 1];
+            GPIO.out.val = axes[mouse_cnt - 1];
         }
     }
     else {
-        GPIO.out = map[0][2];
+        GPIO.out.val = map[0][2];
     }
-    GPIO.status_w1tc = P1_OE_MASK;
+    GPIO.status_w1tc.val = P1_OE_MASK;
     return 0;
 }
 
@@ -325,10 +325,10 @@ static void pce_kb_task(void) {
                 if (cycle < 17) {
                     ++cycle;
                 }
-                GPIO.out = scancodes[cycle][1];
+                GPIO.out.val = scancodes[cycle][1];
             }
             else {
-                GPIO.out = scancodes[cycle][0];
+                GPIO.out.val = scancodes[cycle][0];
             }
             timeout = 0;
         }
@@ -339,12 +339,12 @@ static unsigned pce_kb_oe_isr(unsigned cause) {
     uint32_t cur_in1 = GPIO.in1.val;
     cycle = 0;
     if (cur_in1 & P1_SEL_MASK) {
-        GPIO.out = scancodes[cycle][1];
+        GPIO.out.val = scancodes[cycle][1];
     }
     else {
-        GPIO.out = scancodes[cycle][0];
+        GPIO.out.val = scancodes[cycle][0];
     }
-    GPIO.status_w1tc = P1_OE_MASK;
+    GPIO.status_w1tc.val = P1_OE_MASK;
     return 0;
 }
 

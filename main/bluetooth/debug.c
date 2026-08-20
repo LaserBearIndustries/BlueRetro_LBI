@@ -51,50 +51,50 @@ void bt_dbg(uint8_t *data, uint16_t len) {
 #else
 #ifdef CONFIG_BLUERETRO_BT_MIN_LATENCY_TEST_PS3
         if ((*(uint32_t *)&data[11]) & 0x01FFFF00) {
-            GPIO.out = 0xFBFFFFFF;
+            GPIO.out.val = 0xFBFFFFFF;
         }
         else {
-            GPIO.out = 0xFFFFFFFF;
+            GPIO.out.val = 0xFFFFFFFF;
         }
 #else
 #ifdef CONFIG_BLUERETRO_BT_MIN_LATENCY_TEST_PS4
         if ((*(uint32_t *)&data[6+11]) & 0x0003FFF0) {
-            GPIO.out = 0xFBFFFFFF;
+            GPIO.out.val = 0xFBFFFFFF;
         }
         else {
-            GPIO.out = 0xFFFFFFFF;
+            GPIO.out.val = 0xFFFFFFFF;
         }
 #else
 #ifdef CONFIG_BLUERETRO_BT_MIN_LATENCY_TEST_PS5
         if ((*(uint32_t *)&data[8+11]) & 0x0003FFF0) {
-            GPIO.out = 0xFBFFFFFF;
+            GPIO.out.val = 0xFBFFFFFF;
         }
         else {
-            GPIO.out = 0xFFFFFFFF;
+            GPIO.out.val = 0xFFFFFFFF;
         }
 #else
 #ifdef CONFIG_BLUERETRO_BT_MIN_LATENCY_TEST_WIIU
         if (~(*(uint32_t *)&data[13+11]) & 0x0003FFFE) {
-            GPIO.out = 0xFBFFFFFF;
+            GPIO.out.val = 0xFBFFFFFF;
         }
         else {
-            GPIO.out = 0xFFFFFFFF;
+            GPIO.out.val = 0xFFFFFFFF;
         }
 #else
 #ifdef CONFIG_BLUERETRO_BT_MIN_LATENCY_TEST_XB1
         if ((*(uint32_t *)&data[13+11]) & 0x000003FF) {
-            GPIO.out = 0xFBFFFFFF;
+            GPIO.out.val = 0xFBFFFFFF;
         }
         else {
-            GPIO.out = 0xFFFFFFFF;
+            GPIO.out.val = 0xFFFFFFFF;
         }
 #else
 #ifdef CONFIG_BLUERETRO_BT_MIN_LATENCY_TEST_SW
         if ((*(uint16_t *)&data[+11])) {
-            GPIO.out = 0xFBFFFFFF;
+            GPIO.out.val = 0xFBFFFFFF;
         }
         else {
-            GPIO.out = 0xFFFFFFFF;
+            GPIO.out.val = 0xFFFFFFFF;
         }
 #endif
 #endif

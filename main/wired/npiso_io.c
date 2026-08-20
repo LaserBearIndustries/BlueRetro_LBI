@@ -106,10 +106,10 @@ static inline void set_data(uint8_t port, uint8_t data_id, uint8_t value) {
     uint32_t mask = gpio_mask[port][NPISO_D0 + data_id];
 
     if (value) {
-        GPIO.out_w1ts = mask;
+        GPIO.out_w1ts.val = mask;
     }
     else {
-        GPIO.out_w1tc = mask;
+        GPIO.out_w1tc.val = mask;
     }
 }
 
@@ -170,8 +170,8 @@ static inline void load_trackball_axes(uint8_t port) {
 }
 
 static unsigned npiso_isr(unsigned cause) {
-    const uint32_t low_io = GPIO.acpu_int;
-    const uint32_t high_io = GPIO.acpu_int1.intr;
+    const uint32_t low_io = gpio_intr_status();
+    const uint32_t high_io = gpio_intr_status1();
 
     /* Reset bit counter, set first bit */
     if (high_io & NPISO_LATCH_MASK) {
@@ -208,7 +208,7 @@ static unsigned npiso_isr(unsigned cause) {
         if (low_io & clk_mask) {
             switch (dev_type[i]) {
                 case DEV_FC_NES_PAD:
-                    while (!(GPIO.in & clk_mask)); /* Wait rising edge */
+                    while (!(GPIO.in.val & clk_mask)); /* Wait rising edge */
                     if (idx[i]) {
                         set_data(i, 0, 0);
                     }
@@ -217,7 +217,7 @@ static unsigned npiso_isr(unsigned cause) {
                     }
                     break;
                 case DEV_FC_TRACKBALL:
-                    while (!(GPIO.in & clk_mask)); /* Wait rising edge */
+                    while (!(GPIO.in.val & clk_mask)); /* Wait rising edge */
                     switch (idx[i]) {
                         case 0:
                             set_data(i, 1, wired_adapter.data[i].output[0] & mask[i]);
@@ -239,7 +239,7 @@ static unsigned npiso_isr(unsigned cause) {
                     }
                     break;
                 case DEV_FC_NES_MULTITAP:
-                    while (!(GPIO.in & clk_mask)); /* Wait rising edge */
+                    while (!(GPIO.in.val & clk_mask)); /* Wait rising edge */
                     switch (idx[i]) {
                         case 0:
                             set_data(i, 0, (wired_adapter.data[i].output[0] | wired_adapter.data[i].output_mask[0]) & mask[i]);
@@ -256,7 +256,7 @@ static unsigned npiso_isr(unsigned cause) {
                     }
                     break;
                 case DEV_FC_MULTITAP_ALT:
-                    while (!(GPIO.in & clk_mask)); /* Wait rising edge */
+                    while (!(GPIO.in.val & clk_mask)); /* Wait rising edge */
                     if (idx[i]) {
                         set_data(i, 0, 0);
                         set_data(i, 1, 0);
@@ -267,7 +267,7 @@ static unsigned npiso_isr(unsigned cause) {
                     }
                     break;
                 case DEV_SFC_SNES_PAD:
-                    while (!(GPIO.in & clk_mask)); /* Wait rising edge */
+                    while (!(GPIO.in.val & clk_mask)); /* Wait rising edge */
                     if (idx[i] > 1) {
                         set_data(i, 0, 0);
                     }
@@ -280,7 +280,7 @@ static unsigned npiso_isr(unsigned cause) {
                         mouse_update[i] = 1;
                     }
                     else {
-                        while (!(GPIO.in & clk_mask)); /* Wait rising edge */
+                        while (!(GPIO.in.val & clk_mask)); /* Wait rising edge */
                         switch (idx[i]) {
                             case 0:
                                 set_data(i, 0, wired_adapter.data[i].output[idx[i]] & mask[i]);
@@ -328,26 +328,26 @@ static unsigned npiso_isr(unsigned cause) {
         }
     }
 
-    if (high_io) GPIO.status1_w1tc.intr_st = high_io;
-    if (low_io) GPIO.status_w1tc = low_io;
+    if (high_io) GPIO.status1_w1tc.val = high_io;
+    if (low_io) GPIO.status_w1tc.val = low_io;
 
     return 0;
 }
 
 static unsigned npiso_fc_kb_isr(unsigned cause) {
-    const uint32_t low_io = GPIO.acpu_int;
-    const uint32_t high_io = GPIO.acpu_int1.intr;
+    const uint32_t low_io = gpio_intr_status();
+    const uint32_t high_io = gpio_intr_status1();
 
     /* Update data lines on both edge */
     if (low_io & P1_SEL_MASK) {
-        if (GPIO.in & P1_SEL_MASK) {
+        if (GPIO.in.val & P1_SEL_MASK) {
             kb_data = scancodes[kb_column][1];
-            GPIO.out = kb_data | pads_data;
+            GPIO.out.val = kb_data | pads_data;
             kb_column++;
         }
         else {
             kb_data = scancodes[kb_column][0];
-            GPIO.out = kb_data | pads_data;
+            GPIO.out.val = kb_data | pads_data;
         }
     }
 
@@ -358,7 +358,7 @@ static unsigned npiso_fc_kb_isr(unsigned cause) {
             (((wired_adapter.data[1].output[0] | wired_adapter.data[1].output_mask[0]) & 0x80) ? gpio_mask[0][NPISO_D0] : 0) |
             (((wired_adapter.data[2].output[0] | wired_adapter.data[2].output_mask[0]) & 0x80) ? gpio_mask[1][NPISO_D0] : 0);
         kb_data = scancodes[0][0];
-        GPIO.out = kb_data | pads_data;
+        GPIO.out.val = kb_data | pads_data;
         pads_idx[0] = 1;
         pads_idx[1] = 1;
     }
@@ -370,7 +370,7 @@ static unsigned npiso_fc_kb_isr(unsigned cause) {
             pads_data &= ~gpio_mask[i][NPISO_D0];
             pads_data |=
             ((wired_adapter.data[i + 1].output[0] | wired_adapter.data[i + 1].output_mask[0]) & (0x80 >> pads_idx[i])) ? gpio_mask[i][NPISO_D0] : 0;
-            GPIO.out = kb_data | pads_data;
+            GPIO.out.val = kb_data | pads_data;
             pads_idx[i]++;
             if (pads_idx[i] == 9) {
                 ++wired_adapter.data[i + 1].frame_cnt;
@@ -379,16 +379,16 @@ static unsigned npiso_fc_kb_isr(unsigned cause) {
         }
     }
 
-    if (high_io) GPIO.status1_w1tc.intr_st = high_io;
-    if (low_io) GPIO.status_w1tc = low_io;
+    if (high_io) GPIO.status1_w1tc.val = high_io;
+    if (low_io) GPIO.status_w1tc.val = low_io;
 
     return 0;
 }
 
 #if 0
 static unsigned npiso_sfc_snes_5p_isr(unsigned cause) {
-    const uint32_t low_io = GPIO.acpu_int;
-    const uint32_t high_io = GPIO.acpu_int1.intr;
+    const uint32_t low_io = gpio_intr_status();
+    const uint32_t high_io = gpio_intr_status1();
 
     if (high_io & NPISO_LATCH_MASK) {
         /* 2p/5p Multitap Switch */
@@ -429,7 +429,7 @@ static unsigned npiso_sfc_snes_5p_isr(unsigned cause) {
                 break;
             default: /* 5p mode */
                 set_data(1, 1, 0); /* Multitap detection */
-                switch (GPIO.in & P2_SEL_MASK) {
+                switch (GPIO.in.val & P2_SEL_MASK) {
                     default:
                         set_data(1, 0, wired_adapter.data[1].output[0] & 0x80); /* 2p */
                         idx[1] = 0;
@@ -464,17 +464,17 @@ static unsigned npiso_sfc_snes_5p_isr(unsigned cause) {
             }
             switch (idx[0]) {
                 case 0:
-                    while (!(GPIO.in & P1_CLK_MASK)); /* Wait rising edge */
+                    while (!(GPIO.in.val & P1_CLK_MASK)); /* Wait rising edge */
                     set_data(0, 0, wired_adapter.data[0].output[0] & mask[0]);
                     mask[0] >>= 1;
                     break;
                 case 1:
-                    while (!(GPIO.in & P1_CLK_MASK)); /* Wait rising edge */
+                    while (!(GPIO.in.val & P1_CLK_MASK)); /* Wait rising edge */
                     set_data(0, 0, wired_adapter.data[0].output[1] & mask[0]);
                     mask[0] >>= 1;
                     break;
                 default:
-                    while (!(GPIO.in & P1_CLK_MASK)); /* Wait rising edge */
+                    while (!(GPIO.in.val & P1_CLK_MASK)); /* Wait rising edge */
                     set_data(0, 0, 0);
                     break;
             }
@@ -495,17 +495,17 @@ static unsigned npiso_sfc_snes_5p_isr(unsigned cause) {
                     }
                     switch (idx[1]) {
                         case 0:
-                            while (!(GPIO.in & P2_CLK_MASK)); /* Wait rising edge */
+                            while (!(GPIO.in.val & P2_CLK_MASK)); /* Wait rising edge */
                             set_data(1, 0, wired_adapter.data[1].output[0] & mask[1]);
                             mask[1] >>= 1;
                             break;
                         case 1:
-                            while (!(GPIO.in & P2_CLK_MASK)); /* Wait rising edge */
+                            while (!(GPIO.in.val & P2_CLK_MASK)); /* Wait rising edge */
                             set_data(1, 0, wired_adapter.data[1].output[1] & mask[1]);
                             mask[1] >>= 1;
                             break;
                         default:
-                            while (!(GPIO.in & P2_CLK_MASK)); /* Wait rising edge */
+                            while (!(GPIO.in.val & P2_CLK_MASK)); /* Wait rising edge */
                             set_data(1, 0, 0);
                             break;
                     }
@@ -527,31 +527,31 @@ static unsigned npiso_sfc_snes_5p_isr(unsigned cause) {
                     }
                     switch (idx[1]) {
                         case 0:
-                            while (!(GPIO.in & P2_CLK_MASK)); /* Wait rising edge */
+                            while (!(GPIO.in.val & P2_CLK_MASK)); /* Wait rising edge */
                             set_data(1, 0, wired_adapter.data[1].output[0] & mask[1]);
                             set_data(1, 1, wired_adapter.data[2].output[0] & mask[1]);
                             mask[1] >>= 1;
                             break;
                         case 1:
-                            while (!(GPIO.in & P2_CLK_MASK)); /* Wait rising edge */
+                            while (!(GPIO.in.val & P2_CLK_MASK)); /* Wait rising edge */
                             set_data(1, 0, wired_adapter.data[1].output[1] & mask[1]);
                             set_data(1, 1, wired_adapter.data[2].output[1] & mask[1]);
                             mask[1] >>= 1;
                             break;
                         case 3:
-                            while (!(GPIO.in & P2_CLK_MASK)); /* Wait rising edge */
+                            while (!(GPIO.in.val & P2_CLK_MASK)); /* Wait rising edge */
                             set_data(1, 0, wired_adapter.data[3].output[0] & mask[1]);
                             set_data(1, 1, wired_adapter.data[4].output[0] & mask[1]);
                             mask[1] >>= 1;
                             break;
                         case 4:
-                            while (!(GPIO.in & P2_CLK_MASK)); /* Wait rising edge */
+                            while (!(GPIO.in.val & P2_CLK_MASK)); /* Wait rising edge */
                             set_data(1, 0, wired_adapter.data[3].output[1] & mask[1]);
                             set_data(1, 1, wired_adapter.data[4].output[1] & mask[1]);
                             mask[1] >>= 1;
                             break;
                         default:
-                            while (!(GPIO.in & P2_CLK_MASK)); /* Wait rising edge */
+                            while (!(GPIO.in.val & P2_CLK_MASK)); /* Wait rising edge */
                             set_data(1, 0, 0);
                             set_data(1, 1, 0);
                             break;
@@ -561,8 +561,8 @@ static unsigned npiso_sfc_snes_5p_isr(unsigned cause) {
         }
     }
 
-    if (high_io) GPIO.status1_w1tc.intr_st = high_io;
-    if (low_io) GPIO.status_w1tc = low_io;
+    if (high_io) GPIO.status1_w1tc.val = high_io;
+    if (low_io) GPIO.status_w1tc.val = low_io;
 
     return 0;
 }
@@ -663,7 +663,7 @@ void npiso_init(uint32_t package)
     for (uint32_t i = 0; i < sizeof(kb_gpio_pins); i++) {
         io_conf.pin_bit_mask = 1ULL << kb_gpio_pins[i];
         gpio_config_iram(&io_conf);
-        GPIO.out_w1ts = 1U << kb_gpio_pins[i];
+        GPIO.out_w1ts.val = 1U << kb_gpio_pins[i];
     }
 
     /* P1 Select */

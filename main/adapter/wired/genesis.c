@@ -545,7 +545,7 @@ void genesis_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct
                 struct genesis_map *map2 = (struct genesis_map *)wired_adapter.data[1].output;
                 uint32_t cycle = !(GPIO.in1.val & BIT(P1_TH_PIN - 32));
                 uint32_t cycle2 = !(GPIO.in1.val & BIT(P2_TH_PIN - 32));
-                GPIO.out = map1->buttons[cycle] & map2->buttons[cycle2];
+                GPIO.out.val = map1->buttons[cycle] & map2->buttons[cycle2];
                 GPIO.out1.val = map1->buttons_high[cycle] & map2->buttons_high[cycle2];
             }
 #endif

@@ -421,7 +421,7 @@ static void jag_ctrl_task(void) {
             }
             idx = (((cur_in1 & 0x18) >> 1) | (cur_in1 & 0x3)) & 0xF;
 
-            GPIO.out = *map[bank[socket_idx[idx]]][idx] | *map_mask[bank[socket_idx[idx]]][idx];
+            GPIO.out.val = *map[bank[socket_idx[idx]]][idx] | *map_mask[bank[socket_idx[idx]]][idx];
             timeout = 0;
 
             if (row_idx[idx] == 3) {
@@ -441,7 +441,7 @@ void jag_io_force_update(void) {
 
     idx = (((cur_in1 & 0x18) >> 1) | (cur_in1 & 0x3)) & 0xF;
 
-    GPIO.out = *map[bank[socket_idx[idx]]][idx];
+    GPIO.out.val = *map[bank[socket_idx[idx]]][idx];
 #endif /* defined (CONFIG_BLUERETRO_SYSTEM_JAGUAR */
 }
 

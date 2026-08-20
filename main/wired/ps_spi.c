@@ -223,7 +223,7 @@ static uint32_t get_dtr_state(uint32_t port) {
         }
     }
     else {
-        if (GPIO.in & BIT(P2_DTR_PIN)) {
+        if (GPIO.in.val & BIT(P2_DTR_PIN)) {
             return 1;
         }
     }
@@ -257,14 +257,14 @@ static void set_output_state(uint32_t port, uint32_t enable) {
 
 static void toggle_dsr(uint32_t port) {
     if (port == 0) {
-        GPIO.out_w1tc = BIT(P1_DSR_PIN);
+        GPIO.out_w1tc.val = BIT(P1_DSR_PIN);
         delay_us(2);
-        GPIO.out_w1ts = BIT(P1_DSR_PIN);
+        GPIO.out_w1ts.val = BIT(P1_DSR_PIN);
     }
     else {
-        GPIO.out_w1tc = BIT(P2_DSR_PIN);
+        GPIO.out_w1tc.val = BIT(P2_DSR_PIN);
         delay_us(2);
-        GPIO.out_w1ts = BIT(P2_DSR_PIN);
+        GPIO.out_w1ts.val = BIT(P2_DSR_PIN);
     }
 }
 
@@ -692,8 +692,8 @@ static int32_t ps_mc_hdlr(struct ps_ctrl_port *port) {
 }
 
 static void packet_end(void *arg) {
-    const uint32_t low_io = GPIO.acpu_int;
-    const uint32_t high_io = GPIO.acpu_int1.intr;
+    const uint32_t low_io = gpio_intr_status();
+    const uint32_t high_io = gpio_intr_status1();
     uint32_t port_int[2] = {0};
 
     if (high_io & BIT(P1_DTR_PIN - 32)) {
@@ -778,8 +778,8 @@ static void packet_end(void *arg) {
         }
     }
 
-    if (high_io) GPIO.status1_w1tc.intr_st = high_io;
-    if (low_io) GPIO.status_w1tc = low_io;
+    if (high_io) GPIO.status1_w1tc.val = high_io;
+    if (low_io) GPIO.status_w1tc.val = low_io;
 }
 
 static void spi_isr(void* arg) {

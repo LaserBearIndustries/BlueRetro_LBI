@@ -97,7 +97,7 @@ void para_1p_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct
             }
         }
 
-        GPIO.out = map_tmp.buttons | turbo_map_mask->buttons;
+        GPIO.out.val = map_tmp.buttons | turbo_map_mask->buttons;
         GPIO.out1.val = map_tmp.buttons_high | turbo_map_mask->buttons_high;
 
         memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp));

@@ -214,7 +214,7 @@ void sea_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct wir
         }
 
         if (!(map_tmp->gbahd_state & BIT(GBAHD_STATE_OSD))) {
-            GPIO.out = map_tmp->buttons | turbo_map_mask->buttons;
+            GPIO.out.val = map_tmp->buttons | turbo_map_mask->buttons;
             GPIO.out1.val = map_tmp->buttons_high | turbo_map_mask->buttons_high;
         }
 

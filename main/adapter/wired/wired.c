@@ -168,7 +168,7 @@ void wired_para_turbo_mask_hdlr(void) {
         ++wired_adapter.data[0].frame_cnt;
         para_1p_gen_turbo_mask(&wired_adapter.data[0]);
 
-        GPIO.out = map->buttons | turbo_map_mask->buttons;
+        GPIO.out.val = map->buttons | turbo_map_mask->buttons;
         GPIO.out1.val = map->buttons_high | turbo_map_mask->buttons_high;
     }
     else if (wired_adapter.system_id == PARALLEL_2P || wired_adapter.system_id == PARALLEL_2P_OD) {
@@ -182,7 +182,7 @@ void wired_para_turbo_mask_hdlr(void) {
         ++wired_adapter.data[1].frame_cnt;
         para_2p_gen_turbo_mask(1, &wired_adapter.data[1]);
 
-        GPIO.out = (map1->buttons | map1_mask->buttons) & (map2->buttons | map2_mask->buttons);
+        GPIO.out.val = (map1->buttons | map1_mask->buttons) & (map2->buttons | map2_mask->buttons);
         GPIO.out1.val = (map1->buttons_high | map1_mask->buttons_high) & (map2->buttons_high | map2_mask->buttons_high);
     }
     else if (wired_adapter.system_id == SEA_BOARD) {
@@ -193,7 +193,7 @@ void wired_para_turbo_mask_hdlr(void) {
         sea_gen_turbo_mask(&wired_adapter.data[0]);
 
         if (!(map->gbahd_state & BIT(GBAHD_STATE_OSD))) {
-            GPIO.out = map->buttons | turbo_map_mask->buttons;
+            GPIO.out.val = map->buttons | turbo_map_mask->buttons;
             GPIO.out1.val = map->buttons_high | turbo_map_mask->buttons_high;
         }
     }

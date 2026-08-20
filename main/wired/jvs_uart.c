@@ -111,7 +111,7 @@ static void jvs_parser(uint8_t *rx_buf, uint32_t rx_len, uint8_t *tx_buf, uint32
             switch (*jvs++) {
                 case 0xF0: /* Reset */
                     if (*jvs++ == 0xD9) {
-                        GPIO.out_w1ts = JVS_SENSE_MASK;
+                        GPIO.out_w1ts.val = JVS_SENSE_MASK;
                         node_id = 0;
                     }
                     len = 0;
@@ -119,7 +119,7 @@ static void jvs_parser(uint8_t *rx_buf, uint32_t rx_len, uint8_t *tx_buf, uint32
                 case 0xF1: /* Set Address */
                     if (!node_id) {
                         node_id = *jvs;
-                        GPIO.out_w1tc = JVS_SENSE_MASK;
+                        GPIO.out_w1tc.val = JVS_SENSE_MASK;
                         tx_buf[len++] = 0x01;
                     }
                     else {
@@ -267,7 +267,7 @@ static unsigned uart_rx(unsigned cause) {
 #endif
 
         if (tx_len) {
-            GPIO.out_w1ts = JVS_RTS_MASK;
+            GPIO.out_w1ts.val = JVS_RTS_MASK;
             delay_us(10);
             jvs_write_txfifo(tx_buf, tx_len);
         }
@@ -277,7 +277,7 @@ static unsigned uart_rx(unsigned cause) {
         uart_ll_rxfifo_rst(&UART1);
     }
     if (intr_status & UART_INTR_TX_DONE) {
-        GPIO.out_w1tc = JVS_RTS_MASK;
+        GPIO.out_w1tc.val = JVS_RTS_MASK;
     }
     UART1.int_clr.val = intr_status;
     return 0;
@@ -301,11 +301,11 @@ void jvs_init(uint32_t package) {
 
     /* JVS_SENSE is output */
     gpio_config_iram(&jvs_sense_conf);
-    GPIO.out_w1ts = JVS_SENSE_MASK;
+    GPIO.out_w1ts.val = JVS_SENSE_MASK;
 
     /* JVS_RTS is output */
     gpio_config_iram(&jvs_rts_conf);
-    GPIO.out_w1tc = JVS_RTS_MASK;
+    GPIO.out_w1tc.val = JVS_RTS_MASK;
 
     /* JVS_TX is output */
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[JVS_TX_PIN], PIN_FUNC_GPIO);

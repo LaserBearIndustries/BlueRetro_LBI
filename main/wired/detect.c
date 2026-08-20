@@ -44,16 +44,16 @@ static void detect_system(const uint32_t io, const uint8_t (*system_id)[4], cons
 }
 
 static unsigned detect_isr(unsigned cause) {
-    const uint32_t low_io = GPIO.acpu_int;
-    const uint32_t high_io = GPIO.acpu_int1.intr;
+    const uint32_t low_io = gpio_intr_status();
+    const uint32_t high_io = gpio_intr_status1();
 
     if (high_io) {
         detect_system(high_io, system_id_high, detect_pin_high);
-        GPIO.status1_w1tc.intr_st = high_io;
+        GPIO.status1_w1tc.val = high_io;
     }
     if (low_io) {
         detect_system(low_io, system_id_low, detect_pin_low);
-        GPIO.status_w1tc = low_io;
+        GPIO.status_w1tc.val = low_io;
     }
     return 0;
 }

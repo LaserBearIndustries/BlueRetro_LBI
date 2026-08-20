@@ -183,10 +183,10 @@ static inline void load_mouse_axes(uint8_t port, uint8_t *flags, uint8_t *axes) 
 static void tx_nibble(uint8_t port, uint8_t data) {
     for (uint8_t i = SIO_R, mask = 0x8; mask; mask >>= 1, i++) {
         if (data & mask) {
-            GPIO.out_w1ts = BIT(gpio_pin[port][i]);
+            GPIO.out_w1ts.val = BIT(gpio_pin[port][i]);
         }
         else {
-            GPIO.out_w1tc = BIT(gpio_pin[port][i]);
+            GPIO.out_w1tc.val = BIT(gpio_pin[port][i]);
         }
     }
 }
@@ -196,10 +196,10 @@ static void set_sio(uint8_t port, uint8_t sio, uint8_t value) {
 
     if (pin < 32) {
         if (value) {
-            GPIO.out_w1ts = BIT(pin);
+            GPIO.out_w1ts.val = BIT(pin);
         }
         else {
-            GPIO.out_w1tc = BIT(pin);
+            GPIO.out_w1tc.val = BIT(pin);
         }
     }
     else {
@@ -219,7 +219,7 @@ static void twh_tx(uint8_t port, uint8_t *data, uint32_t len, uint8_t ack_delay)
     /* TX data */
     for (uint32_t i = 0; i < len; i++) {
         timeout = 0;
-        while (GPIO.in & BIT(gpio_pin[port][SIO_TR]))
+        while (GPIO.in.val & BIT(gpio_pin[port][SIO_TR]))
         {
             if (GPIO.in1.val & BIT(gpio_pin[port][SIO_TH] - 32) || timeout > TWH_TIMEOUT) {
                 goto end;
@@ -232,7 +232,7 @@ static void twh_tx(uint8_t port, uint8_t *data, uint32_t len, uint8_t ack_delay)
         tl_state ^= 0x01;
 
         timeout = 0;
-        while (!(GPIO.in & BIT(gpio_pin[port][SIO_TR])))
+        while (!(GPIO.in.val & BIT(gpio_pin[port][SIO_TR])))
         {
             if (GPIO.in1.val & BIT(gpio_pin[port][SIO_TH] - 32) || timeout > TWH_TIMEOUT) {
                 goto end;
@@ -248,7 +248,7 @@ static void twh_tx(uint8_t port, uint8_t *data, uint32_t len, uint8_t ack_delay)
     /* Answer extra cycle with last byte */
     while (1) {
         timeout = 0;
-        while (GPIO.in & BIT(gpio_pin[port][SIO_TR]))
+        while (GPIO.in.val & BIT(gpio_pin[port][SIO_TR]))
         {
             if (GPIO.in1.val & BIT(gpio_pin[port][SIO_TH] - 32) || timeout > TWH_TIMEOUT) {
                 goto end;
@@ -260,7 +260,7 @@ static void twh_tx(uint8_t port, uint8_t *data, uint32_t len, uint8_t ack_delay)
         tl_state ^= 0x01;
 
         timeout = 0;
-        while (!(GPIO.in & BIT(gpio_pin[port][SIO_TR])))
+        while (!(GPIO.in.val & BIT(gpio_pin[port][SIO_TR])))
         {
             if (GPIO.in1.val & BIT(gpio_pin[port][SIO_TH] - 32) || timeout > TWH_TIMEOUT) {
                 goto end;
@@ -459,9 +459,9 @@ static void set_gen_multitap(uint8_t port, uint8_t first_port, uint8_t nb_port) 
 
 static void sega_genesis_task(void) {
     uint32_t timeout, cur_in, prev_in, change, idx = 0, lock = 0;
-    uint32_t p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+    uint32_t p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
     uint32_t p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
-    uint32_t p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+    uint32_t p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
     uint32_t p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
 
     while (1) {
@@ -477,13 +477,13 @@ p1_poll_start:
             if (cur_in & BIT(P1_TH_PIN - 32)) {
                 goto p1_reverse_poll;
             }
-            GPIO.out = (map1[1] | map1_mask[1]) & p2_out0;                                /* P1 Cycle0 low */
+            GPIO.out.val = (map1[1] | map1_mask[1]) & p2_out0;                                /* P1 Cycle0 low */
             GPIO.out1.val = (map1[4] | map1_mask[4]) & p2_out1;
             if (!lock) {
                 core0_stall_start();
                 ++lock;
             }
-            p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+            p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
             p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
             idx = 0;
             if (dev_type[0] == DEV_GENESIS_MULTITAP) {
@@ -494,9 +494,9 @@ p1_poll_start:
                 }
                 set_gen_multitap(0, mt_first_port[0], MT_GEN_PORT_MAX);
                 if (GPIO.in1.val & BIT(P1_TH_PIN - 32)) {
-                    GPIO.out = (map1[0] | map1_mask[0]) & p2_out0;
+                    GPIO.out.val = (map1[0] | map1_mask[0]) & p2_out0;
                     GPIO.out1.val = (map1[3] | map1_mask[3]) & p2_out1;
-                    p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+                    p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
                     p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
                     goto next_poll;
                 }
@@ -509,9 +509,9 @@ p1_poll_start:
                 }
                 set_sega_mouse(0, mt_first_port[0]);
                 if (GPIO.in1.val & BIT(P1_TH_PIN - 32)) {
-                    GPIO.out = (map1[0] | map1_mask[0]) & p2_out0;
+                    GPIO.out.val = (map1[0] | map1_mask[0]) & p2_out0;
                     GPIO.out1.val = (map1[3] | map1_mask[3]) & p2_out1;
-                    p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+                    p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
                     p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
                     goto next_poll;
                 }
@@ -529,13 +529,13 @@ p1_poll_start:
                 goto p2_poll_start;
             }
 p1_reverse_poll:
-            GPIO.out = (map1[0] | map1_mask[0]) & p2_out0;                                /* P1 Cycle0 high */
+            GPIO.out.val = (map1[0] | map1_mask[0]) & p2_out0;                                /* P1 Cycle0 high */
             GPIO.out1.val = (map1[3] | map1_mask[3]) & p2_out1;
             if (!lock) {
                 core0_stall_start();
                 ++lock;
             }
-            p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+            p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
             p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
             timeout = 0;
             cur_in = prev_in = GPIO.in1.val;
@@ -549,9 +549,9 @@ p1_reverse_poll:
             if (change & BIT(P2_TH_PIN - 32)) {
                 goto p2_poll_start;
             }
-            GPIO.out = (map1[1] | map1_mask[1]) & p2_out0;                                /* P1 Cycle1 low */
+            GPIO.out.val = (map1[1] | map1_mask[1]) & p2_out0;                                /* P1 Cycle1 low */
             GPIO.out1.val = (map1[4] | map1_mask[4]) & p2_out1;
-            p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+            p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
             p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
             if (dev_type[0] == DEV_GENESIS_6BTNS) {
                 timeout = 0;
@@ -566,9 +566,9 @@ p1_reverse_poll:
                 if (change & BIT(P2_TH_PIN - 32)) {
                     goto p2_poll_start;
                 }
-                GPIO.out = (map1[0] | map1_mask[0]) & p2_out0;                            /* P1 Cycle1 high */
+                GPIO.out.val = (map1[0] | map1_mask[0]) & p2_out0;                            /* P1 Cycle1 high */
                 GPIO.out1.val = (map1[3] | map1_mask[3]) & p2_out1;
-                p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+                p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
                 p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
                 timeout = 0;
                 cur_in = prev_in = GPIO.in1.val;
@@ -582,9 +582,9 @@ p1_reverse_poll:
                 if (change & BIT(P2_TH_PIN - 32)) {
                     goto p2_poll_start;
                 }
-                GPIO.out = ((map1[1] | map1_mask[1]) & SIX_BTNS_P1_C2_LO_MASK) & p2_out0; /* P1 Cycle2 low */
+                GPIO.out.val = ((map1[1] | map1_mask[1]) & SIX_BTNS_P1_C2_LO_MASK) & p2_out0; /* P1 Cycle2 low */
                 GPIO.out1.val = (map1[4] | map1_mask[4]) & p2_out1;
-                p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+                p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
                 p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
                 timeout = 0;
                 cur_in = prev_in = GPIO.in1.val;
@@ -598,9 +598,9 @@ p1_reverse_poll:
                 if (change & BIT(P2_TH_PIN - 32)) {
                     goto p2_poll_start;
                 }
-                GPIO.out = (map1[2] | map1_mask[2]) & p2_out0;                            /* P1 Cycle2 high XYZM */
+                GPIO.out.val = (map1[2] | map1_mask[2]) & p2_out0;                            /* P1 Cycle2 high XYZM */
                 GPIO.out1.val = (map1[5] | map1_mask[5]) & p2_out1;
-                p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+                p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
                 p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
                 timeout = 0;
                 cur_in = prev_in = GPIO.in1.val;
@@ -614,9 +614,9 @@ p1_reverse_poll:
                 if (change & BIT(P2_TH_PIN - 32)) {
                     goto p2_poll_start;
                 }
-                GPIO.out = ((map1[1] | map1_mask[1]) | SIX_BTNS_P1_C3_LO_MASK) & p2_out0; /* P1 Cycle3 low */
+                GPIO.out.val = ((map1[1] | map1_mask[1]) | SIX_BTNS_P1_C3_LO_MASK) & p2_out0; /* P1 Cycle3 low */
                 GPIO.out1.val = (map1[4] | map1_mask[4]) & p2_out1;
-                p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+                p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
                 p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
                 timeout = 0;
                 cur_in = prev_in = GPIO.in1.val;
@@ -630,9 +630,9 @@ p1_reverse_poll:
                 if (change & BIT(P2_TH_PIN - 32)) {
                     goto p2_poll_start;
                 }
-                GPIO.out = (map1[0] | map1_mask[0]) & p2_out0;                            /* P1 Cycle3 high */
+                GPIO.out.val = (map1[0] | map1_mask[0]) & p2_out0;                            /* P1 Cycle3 high */
                 GPIO.out1.val = (map1[3] | map1_mask[3]) & p2_out1;
-                p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+                p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
                 p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
             }
         }
@@ -641,13 +641,13 @@ p2_poll_start:
             if (cur_in & BIT(P2_TH_PIN - 32)) {
                 goto p2_reverse_poll;
             }
-            GPIO.out = p1_out0 & (map2[1] | map2_mask[1]);                                /* P2 Cycle0 low */
+            GPIO.out.val = p1_out0 & (map2[1] | map2_mask[1]);                                /* P2 Cycle0 low */
             GPIO.out1.val = p1_out1 & (map2[4] | map2_mask[4]);
             if (!lock) {
                 core0_stall_start();
                 ++lock;
             }
-            p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+            p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
             p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
             idx = 1;
             if (dev_type[1] == DEV_GENESIS_MULTITAP) {
@@ -658,9 +658,9 @@ p2_poll_start:
                 }
                 set_gen_multitap(1, mt_first_port[1], MT_GEN_PORT_MAX);
                 if (GPIO.in1.val & BIT(P2_TH_PIN - 32)) {
-                    GPIO.out = p1_out0 & (map2[0] | map2_mask[0]);
+                    GPIO.out.val = p1_out0 & (map2[0] | map2_mask[0]);
                     GPIO.out1.val = p1_out1 & (map2[3] | map2_mask[3]);
-                    p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+                    p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
                     p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
                     goto next_poll;
                 }
@@ -673,9 +673,9 @@ p2_poll_start:
                 }
                 set_sega_mouse(1, mt_first_port[1]);
                 if (GPIO.in1.val & BIT(P2_TH_PIN - 32)) {
-                    GPIO.out = p1_out0 & (map2[0] | map2_mask[0]);
+                    GPIO.out.val = p1_out0 & (map2[0] | map2_mask[0]);
                     GPIO.out1.val = p1_out1 & (map2[3] | map2_mask[3]);
-                    p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+                    p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
                     p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
                     goto next_poll;
                 }
@@ -693,13 +693,13 @@ p2_poll_start:
                 goto p1_poll_start;
             }
 p2_reverse_poll:
-            GPIO.out = p1_out0 & (map2[0] | map2_mask[0]);                                /* P2 Cycle0 high */
+            GPIO.out.val = p1_out0 & (map2[0] | map2_mask[0]);                                /* P2 Cycle0 high */
             GPIO.out1.val = p1_out1 & (map2[3] | map2_mask[3]);
             if (!lock) {
                 core0_stall_start();
                 ++lock;
             }
-            p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+            p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
             p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
             timeout = 0;
             cur_in = prev_in = GPIO.in1.val;
@@ -713,9 +713,9 @@ p2_reverse_poll:
             if (change & BIT(P1_TH_PIN - 32)) {
                 goto p1_poll_start;
             }
-            GPIO.out = p1_out0 & (map2[1] | map2_mask[1]);                                /* P2 Cycle1 low */
+            GPIO.out.val = p1_out0 & (map2[1] | map2_mask[1]);                                /* P2 Cycle1 low */
             GPIO.out1.val = p1_out1 & (map2[4] | map2_mask[4]);
-            p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+            p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
             p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
             if (dev_type[1] == DEV_GENESIS_6BTNS) {
                 timeout = 0;
@@ -730,9 +730,9 @@ p2_reverse_poll:
                 if (change & BIT(P1_TH_PIN - 32)) {
                     goto p1_poll_start;
                 }
-                GPIO.out = p1_out0 & (map2[0] | map2_mask[0]);                            /* P2 Cycle1 high */
+                GPIO.out.val = p1_out0 & (map2[0] | map2_mask[0]);                            /* P2 Cycle1 high */
                 GPIO.out1.val = p1_out1 & (map2[3] | map2_mask[3]);
-                p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+                p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
                 p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
                 timeout = 0;
                 cur_in = prev_in = GPIO.in1.val;
@@ -746,9 +746,9 @@ p2_reverse_poll:
                 if (change & BIT(P1_TH_PIN - 32)) {
                     goto p1_poll_start;
                 }
-                GPIO.out = p1_out0 & ((map2[1] | map2_mask[1]) & SIX_BTNS_P2_C2_LO_MASK); /* P2 Cycle2 low */
+                GPIO.out.val = p1_out0 & ((map2[1] | map2_mask[1]) & SIX_BTNS_P2_C2_LO_MASK); /* P2 Cycle2 low */
                 GPIO.out1.val = p1_out1 & (map2[4] | map2_mask[4]);
-                p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+                p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
                 p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
                 timeout = 0;
                 cur_in = prev_in = GPIO.in1.val;
@@ -762,9 +762,9 @@ p2_reverse_poll:
                 if (change & BIT(P1_TH_PIN - 32)) {
                     goto p1_poll_start;
                 }
-                GPIO.out = p1_out0 & (map2[2] | map2_mask[2]);                            /* P2 Cycle2 high XYZM */
+                GPIO.out.val = p1_out0 & (map2[2] | map2_mask[2]);                            /* P2 Cycle2 high XYZM */
                 GPIO.out1.val = p1_out1 & (map2[5] | map2_mask[5]);
-                p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+                p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
                 p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
                 timeout = 0;
                 cur_in = prev_in = GPIO.in1.val;
@@ -778,9 +778,9 @@ p2_reverse_poll:
                 if (change & BIT(P1_TH_PIN - 32)) {
                     goto p1_poll_start;
                 }
-                GPIO.out = p1_out0 & ((map2[1] | map2_mask[1]) | SIX_BTNS_P2_C3_LO_MASK); /* P2 Cycle3 low */
+                GPIO.out.val = p1_out0 & ((map2[1] | map2_mask[1]) | SIX_BTNS_P2_C3_LO_MASK); /* P2 Cycle3 low */
                 GPIO.out1.val = p1_out1 & (map2[4] | map2_mask[4]);
-                p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+                p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
                 p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
                 timeout = 0;
                 cur_in = prev_in = GPIO.in1.val;
@@ -794,9 +794,9 @@ p2_reverse_poll:
                 if (change & BIT(P1_TH_PIN - 32)) {
                     goto p1_poll_start;
                 }
-                GPIO.out = p1_out0 & (map2[0] | map2_mask[0]);                            /* P2 Cycle3 high */
+                GPIO.out.val = p1_out0 & (map2[0] | map2_mask[0]);                            /* P2 Cycle3 high */
                 GPIO.out1.val = p1_out1 & (map2[3] | map2_mask[3]);
-                p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+                p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
                 p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
             }
         }
@@ -812,8 +812,8 @@ next_poll:
 
 static void sega_saturn_task(void) {
     uint32_t timeout, cur_in, prev_in, change;
-    uint32_t p1_out0 = GPIO.out | ~P1_OUT0_MASK;
-    uint32_t p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+    uint32_t p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
+    uint32_t p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
 
     while (1) {
         timeout = 0;
@@ -824,8 +824,8 @@ static void sega_saturn_task(void) {
         }
 
         if (change & BIT(P1_TH_PIN - 32)) {
-            GPIO.out = id0_lo[0] & p2_out0;
-            p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+            GPIO.out.val = id0_lo[0] & p2_out0;
+            p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
             switch (dev_type[0]) {
                 case DEV_SATURN_DIGITAL_TWH:
                     set_analog_digital_pad(0, mt_first_port[0]);
@@ -858,12 +858,12 @@ static void sega_saturn_task(void) {
                 }
             }
 p1_set_id0_hi:
-            GPIO.out = id0_hi[0] & p2_out0;
-            p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+            GPIO.out.val = id0_hi[0] & p2_out0;
+            p1_out0 = GPIO.out.val | ~P1_OUT0_MASK;
         }
         else {
-            GPIO.out = p1_out0 & id0_lo[1];
-            p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+            GPIO.out.val = p1_out0 & id0_lo[1];
+            p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
             switch (dev_type[1]) {
                 case DEV_SATURN_DIGITAL_TWH:
                     set_analog_digital_pad(1, mt_first_port[1]);
@@ -896,8 +896,8 @@ p1_set_id0_hi:
                 }
             }
 p2_set_id0_hi:
-            GPIO.out = p1_out0 & id0_hi[1];
-            p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+            GPIO.out.val = p1_out0 & id0_hi[1];
+            p2_out0 = GPIO.out.val | ~P2_OUT0_MASK;
         }
 next_poll:
         ;
@@ -907,29 +907,29 @@ next_poll:
 static void ea_genesis_task(void) {
     uint32_t cur_in0, prev_in0, change0 = 0, cur_in1, prev_in1, change1 = 1, id = 0;
 
-    cur_in0 = GPIO.in;
+    cur_in0 = GPIO.in.val;
     cur_in1 = GPIO.in1.val;
     while (1) {
         prev_in0 = cur_in0;
         prev_in1 = cur_in1;
-        cur_in0 = GPIO.in;
+        cur_in0 = GPIO.in.val;
         cur_in1 = GPIO.in1.val;
         while (!(change0 = cur_in0 ^ prev_in0) && !(change1 = cur_in1 ^ prev_in1)) {
             prev_in0 = cur_in0;
             prev_in1 = cur_in1;
-            cur_in0 = GPIO.in;
+            cur_in0 = GPIO.in.val;
             cur_in1 = GPIO.in1.val;
         }
         if (cur_in1 & BIT(P2_TH_PIN - 32)) {
-            GPIO.out = map1[2];
+            GPIO.out.val = map1[2];
         }
         else {
             id = ((cur_in0 & BIT(P2_TR_PIN)) >> (P2_TR_PIN - 1)) | ((cur_in1 & BIT(P2_TL_PIN -32)) >> (P2_TL_PIN - 32));
             if (cur_in1 & BIT(P1_TH_PIN - 32)) {
-                GPIO.out = *(uint32_t *)&wired_adapter.data[id].output[0];
+                GPIO.out.val = *(uint32_t *)&wired_adapter.data[id].output[0];
             }
             else {
-                GPIO.out = *(uint32_t *)&wired_adapter.data[id].output[4];
+                GPIO.out.val = *(uint32_t *)&wired_adapter.data[id].output[4];
             }
         }
     }

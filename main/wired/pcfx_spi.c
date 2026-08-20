@@ -158,8 +158,8 @@ static inline void load_buffer(uint8_t port) {
 }
 
 static unsigned latch_isr(unsigned cause) {
-    const uint32_t low_io = GPIO.acpu_int;
-    const uint32_t high_io = GPIO.acpu_int1.intr;
+    const uint32_t low_io = gpio_intr_status();
+    const uint32_t high_io = gpio_intr_status1();
     uint8_t port = 0;
     struct pcfx_ctrl_port *p;
 
@@ -185,8 +185,8 @@ static unsigned latch_isr(unsigned cause) {
     pcfx_gen_turbo_mask(&wired_adapter.data[port]);
 
 exit:
-    if (high_io) GPIO.status1_w1tc.intr_st = high_io;
-    if (low_io) GPIO.status_w1tc = low_io;
+    if (high_io) GPIO.status1_w1tc.val = high_io;
+    if (low_io) GPIO.status_w1tc.val = low_io;
     return 0;
 }
 

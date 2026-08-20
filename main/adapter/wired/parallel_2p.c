@@ -127,7 +127,7 @@ void para_2p_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct
 
         memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp));
 
-        GPIO.out = (map1->buttons | map1_mask->buttons) & (map2->buttons | map2_mask->buttons);
+        GPIO.out.val = (map1->buttons | map1_mask->buttons) & (map2->buttons | map2_mask->buttons);
         GPIO.out1.val = (map1->buttons_high | map1_mask->buttons_high) & (map2->buttons_high | map2_mask->buttons_high);
 
         TESTS_CMDS_LOG("\"wired_output\": {\"btns\": [%ld, %ld]},\n",

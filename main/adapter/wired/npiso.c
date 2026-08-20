@@ -291,10 +291,10 @@ static void npiso_vtap_gpio(struct wired_ctrl *ctrl_data, struct wired_data *wir
     /* Palette */
     if (ctrl_data->map_mask[0] & generic_btns_mask[PAD_LJ]) {
         if (ctrl_data->btns[0].value & generic_btns_mask[PAD_LJ]) {
-            GPIO.out_w1tc = BIT(VTAP_PAL_PIN);
+            GPIO.out_w1tc.val = BIT(VTAP_PAL_PIN);
         }
         else {
-            GPIO.out_w1ts = BIT(VTAP_PAL_PIN);
+            GPIO.out_w1ts.val = BIT(VTAP_PAL_PIN);
         }
     }
 
@@ -309,11 +309,11 @@ static void npiso_vtap_gpio(struct wired_ctrl *ctrl_data, struct wired_data *wir
             if (atomic_test_bit(&wired_data->flags, WIRED_WAITING_FOR_RELEASE2)) {
                 atomic_clear_bit(&wired_data->flags, WIRED_WAITING_FOR_RELEASE2);
 
-                if (GPIO.out & BIT(VTAP_MODE_PIN)) {
-                    GPIO.out_w1tc = BIT(VTAP_MODE_PIN);
+                if (GPIO.out.val & BIT(VTAP_MODE_PIN)) {
+                    GPIO.out_w1tc.val = BIT(VTAP_MODE_PIN);
                 }
                 else {
-                    GPIO.out_w1ts = BIT(VTAP_MODE_PIN);
+                    GPIO.out_w1ts.val = BIT(VTAP_MODE_PIN);
                 }
             }
         }

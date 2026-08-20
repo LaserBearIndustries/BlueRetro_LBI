@@ -203,74 +203,74 @@ static uint8_t maple_tx(uint32_t port, uint32_t maple0, uint32_t maple1, uint8_t
 
     delay_us(55);
 
-    GPIO.out_w1ts = maple0 | maple1;
+    GPIO.out_w1ts.val = maple0 | maple1;
     gpio_set_direction_iram(gpio_pin[port][0], GPIO_MODE_OUTPUT);
     gpio_set_direction_iram(gpio_pin[port][1], GPIO_MODE_OUTPUT);
     core0_stall_start();
-    GPIO.out_w1tc = maple0;
+    GPIO.out_w1tc.val = maple0;
     wait_500ns();
-    GPIO.out_w1tc = maple1;
+    GPIO.out_w1tc.val = maple1;
     wait_500ns();
-    GPIO.out_w1ts = maple1;
+    GPIO.out_w1ts.val = maple1;
     wait_500ns();
-    GPIO.out_w1tc = maple1;
+    GPIO.out_w1tc.val = maple1;
     wait_500ns();
-    GPIO.out_w1ts = maple1;
+    GPIO.out_w1ts.val = maple1;
     wait_500ns();
-    GPIO.out_w1tc = maple1;
+    GPIO.out_w1tc.val = maple1;
     wait_500ns();
-    GPIO.out_w1ts = maple1;
+    GPIO.out_w1ts.val = maple1;
     wait_500ns();
-    GPIO.out_w1tc = maple1;
+    GPIO.out_w1tc.val = maple1;
     wait_500ns();
-    GPIO.out_w1ts = maple1;
+    GPIO.out_w1ts.val = maple1;
     wait_200ns();
 
     for (uint32_t bit = 0; bit < len*8; ++data) {
         for (uint32_t mask = 0x80; mask; mask >>= 1, ++bit) {
-            GPIO.out_w1ts = maple0;
+            GPIO.out_w1ts.val = maple0;
             wait_200ns();
             if (*data & mask) {
-                GPIO.out_w1ts = maple1;
+                GPIO.out_w1ts.val = maple1;
             }
             else {
-                GPIO.out_w1tc = maple1;
+                GPIO.out_w1tc.val = maple1;
             }
             wait_100ns();
-            GPIO.out_w1tc = maple0;
+            GPIO.out_w1tc.val = maple0;
             wait_200ns();
             mask >>= 1;
             ++bit;
-            GPIO.out_w1ts = maple1;
+            GPIO.out_w1ts.val = maple1;
             wait_200ns();
             if (*data & mask) {
-                GPIO.out_w1ts = maple0;
+                GPIO.out_w1ts.val = maple0;
             }
             else {
-                GPIO.out_w1tc = maple0;
+                GPIO.out_w1tc.val = maple0;
             }
             wait_100ns();
-            GPIO.out_w1tc = maple1;
+            GPIO.out_w1tc.val = maple1;
             wait_200ns();
         }
         crc_ret = *crc;
         *crc ^= *data;
     }
-    GPIO.out_w1ts = maple0;
+    GPIO.out_w1ts.val = maple0;
     wait_100ns();
-    GPIO.out_w1ts = maple1;
+    GPIO.out_w1ts.val = maple1;
     wait_500ns();
-    GPIO.out_w1tc = maple1;
+    GPIO.out_w1tc.val = maple1;
     wait_500ns();
-    GPIO.out_w1tc = maple0;
+    GPIO.out_w1tc.val = maple0;
     wait_500ns();
-    GPIO.out_w1ts = maple0;
+    GPIO.out_w1ts.val = maple0;
     wait_500ns();
-    GPIO.out_w1tc = maple0;
+    GPIO.out_w1tc.val = maple0;
     wait_500ns();
-    GPIO.out_w1ts = maple0;
+    GPIO.out_w1ts.val = maple0;
     wait_500ns();
-    GPIO.out_w1ts = maple1;
+    GPIO.out_w1ts.val = maple1;
 
     core0_stall_end();
     gpio_set_direction_iram(gpio_pin[port][0], GPIO_MODE_INPUT);
@@ -279,7 +279,7 @@ static uint8_t maple_tx(uint32_t port, uint32_t maple0, uint32_t maple1, uint8_t
 }
 
 static unsigned maple_rx(unsigned cause) {
-    const uint32_t maple0 = GPIO.acpu_int;
+    const uint32_t maple0 = gpio_intr_status();
     uint32_t timeout;
     uint32_t bit_cnt = 0;
     uint32_t gpio;
@@ -299,13 +299,13 @@ static unsigned maple_rx(unsigned cause) {
         while (1) {
             for (uint32_t mask = 0x80; mask; mask >>= 1, ++bit_cnt) {
                 timeout = 0;
-                while (!(GPIO.in & maple0)) {
+                while (!(GPIO.in.val & maple0)) {
                     if (++timeout > TIMEOUT_ABORT) {
                         goto maple_abort;
                     }
                 }
                 timeout = 0;
-                while (((gpio = GPIO.in) & maple0)) {
+                while (((gpio = GPIO.in.val) & maple0)) {
                     if (++timeout > TIMEOUT_ABORT) {
                         goto maple_abort;
                     }
@@ -319,13 +319,13 @@ static unsigned maple_rx(unsigned cause) {
                 mask >>= 1;
                 ++bit_cnt;
                 timeout = 0;
-                while (!(GPIO.in & maple1)) {
+                while (!(GPIO.in.val & maple1)) {
                     if (++timeout > TIMEOUT_ABORT) {
                         goto maple_abort;
                     }
                 }
                 timeout = 0;
-                while (((gpio = GPIO.in) & maple1)) {
+                while (((gpio = GPIO.in.val) & maple1)) {
                     if (++timeout > TIMEOUT) {
                         goto maple_end;
                     }
@@ -661,13 +661,13 @@ maple_end:
                 break;
         }
 #endif
-        GPIO.status_w1tc = maple0;
+        GPIO.status_w1tc.val = maple0;
     }
     return 0;
 
 maple_abort:
     core0_stall_end();
-    GPIO.status_w1tc = maple0;
+    GPIO.status_w1tc.val = maple0;
     return 0;
 }
 

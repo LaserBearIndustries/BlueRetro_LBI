@@ -159,14 +159,14 @@ static inline uint8_t load_t_kb_data(uint8_t port, uint8_t *data) {
 }
 
 static void rts_isr(void) {
-    const uint32_t low_io = GPIO.acpu_int;
+    const uint32_t low_io = gpio_intr_status();
     struct cdi_ctrl_port *p;
 
     for (uint32_t i = 0; i < CDI_PORT_MAX; i++) {
         p = &cdi_ctrl_ports[i];
 
         if (low_io & p->rts_mask) {
-            if (GPIO.in & p->rts_mask) {
+            if (GPIO.in.val & p->rts_mask) {
                 uint8_t len;
                 delay_us(2200);
                 WRITE_PERI_REG(UART_FIFO_AHB_REG(i + 1), p->id_code);
@@ -195,7 +195,7 @@ static void rts_isr(void) {
         }
     }
 
-    if (low_io) GPIO.status_w1tc = low_io;
+    if (low_io) GPIO.status_w1tc.val = low_io;
 }
 
 static void uart_isr(struct cdi_ctrl_port *p) {
@@ -242,7 +242,7 @@ static void tx_hdlr(void) {
                 if (update) {
                     memcpy(p->buffer, tmp, 4);
                     for (uint32_t j = 0; j < len; j++) {
-                        if (GPIO.in & p->rts_mask) {
+                        if (GPIO.in.val & p->rts_mask) {
                             WRITE_PERI_REG(UART_FIFO_AHB_REG(i + 1), p->buffer[j]);
                         }
                     }

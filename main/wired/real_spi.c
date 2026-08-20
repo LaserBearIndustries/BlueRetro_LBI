@@ -157,24 +157,24 @@ static void cs_generator(void) {
 
     while (1) {
         timeout = 0;
-        cur_in = prev_in = GPIO.in;
+        cur_in = prev_in = GPIO.in.val;
         while (!(change = cur_in ^ prev_in)) {
             prev_in = cur_in;
-            cur_in = GPIO.in;
+            cur_in = GPIO.in.val;
         }
 
         if (change & P1_SCK_MASK) {
             if (cur_in & P1_SCK_MASK) {
-                while (GPIO.in & P1_SCK_MASK) {
+                while (GPIO.in.val & P1_SCK_MASK) {
                     if (++timeout > CLK_IDLE_TIMEOUT && cs_state == 0) {
-                        GPIO.out_w1ts = P1_CS_OUT_MASK;
+                        GPIO.out_w1ts.val = P1_CS_OUT_MASK;
                         cs_state = 1;
                         break;
                     }
                 }
                 if (cs_state == 1) {
                     delay_us(350);
-                    GPIO.out_w1tc = P1_CS_OUT_MASK;
+                    GPIO.out_w1tc.val = P1_CS_OUT_MASK;
                     cs_state = 0;
                     idx = 0;
                     for (uint32_t i = 0; i < 16; i++) {

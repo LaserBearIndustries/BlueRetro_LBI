@@ -21,6 +21,24 @@
 #include "hal/gpio_types.h"
 #include "driver/gpio.h"
 
+/* The ESP32 gave each core its own GPIO interrupt status register, and the
+ * wired drivers read the APP CPU's pair at ISR entry -- what upstream spelled
+ * as the acpu_int register for GPIO0-31, and acpu_int1 for GPIO32-39.
+ *
+ * The S31 has no per-core status. It has one status register per GPIO
+ * interrupt line instead -- GPIO_INT_0 through GPIO_INT_3 -- each with the
+ * same two-bank shape: intr_0 covers GPIO0-31 and intr_01 covers GPIO32-63.
+ * So the substitution is structural rather than semantic: the drivers want
+ * "what is pending for the line my handler is on", which used to be spelled
+ * "what is pending for my core".
+ *
+ * Which line the wired driver ends up on is settled by the interrupt routing
+ * in intr.c, which is not ported yet. INT_0 is the assumption until it is, and
+ * this is the single place to change when that lands.
+ */
+#define gpio_intr_status()  (GPIO.intr_0.val)
+#define gpio_intr_status1() (GPIO.intr_01.val)
+
 extern const uint32_t GPIO_PIN_MUX_REG_IRAM[];
 
 int32_t gpio_set_level_iram(gpio_num_t gpio_num, uint32_t level);
