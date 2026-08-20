@@ -10,7 +10,7 @@
 #include <soc/rmt_struct.h>
 #include <hal/rmt_types.h>
 #include <hal/rmt_ll.h>
-#include <esp32/rom/ets_sys.h>
+#include <esp_rom_sys.h>
 #include "zephyr/atomic.h"
 #include "zephyr/types.h"
 #include "tools/util.h"
@@ -1017,7 +1017,7 @@ static unsigned n64_isr(unsigned cause) {
         switch (i % 3) {
             /* TX End */
             case 0:
-                //ets_printf("TX_END\n");
+                //esp_rom_printf("TX_END\n");
                 RMT.conf_ch[channel].conf1.mem_rd_rst = 1;
                 RMT.conf_ch[channel].conf1.mem_rd_rst = 0;
                 /* Go RX right away */
@@ -1026,7 +1026,7 @@ static unsigned n64_isr(unsigned cause) {
                 break;
             /* RX End */
             case 1:
-                //ets_printf("RX_END\n");
+                //esp_rom_printf("RX_END\n");
                 rmt_err_cnt[channel] = 0;
                 RMT.conf_ch[channel].conf1.rx_en = 0;
                 RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_SW;
@@ -1088,14 +1088,14 @@ static unsigned n64_isr(unsigned cause) {
                 RMT.conf_ch[channel].conf1.rx_en = 1;
 
                 /* The recovery above is a handful of register writes. The
-                 * printing is what costs: ets_printf blocks in the interrupt
+                 * printing is what costs: esp_rom_printf blocks in the interrupt
                  * until the UART drains. So say the first few per channel and
                  * then stay quiet, rather than turning a noisy line into a
                  * starved CPU. The count clears on the next good receive, so a
                  * channel that recovers can report again later. */
                 if (rmt_err_cnt[channel] < 4) {
                     rmt_err_cnt[channel]++;
-                    ets_printf("ERR ch%d\n", channel);
+                    esp_rom_printf("ERR ch%d\n", channel);
                 }
                 break;
             default:
@@ -1120,7 +1120,7 @@ static unsigned gc_isr(unsigned cause) {
         switch (i % 3) {
             /* TX End */
             case 0:
-                //ets_printf("TX_END\n");
+                //esp_rom_printf("TX_END\n");
                 RMT.conf_ch[channel].conf1.mem_rd_rst = 1;
                 RMT.conf_ch[channel].conf1.mem_rd_rst = 0;
                 /* Go RX right away */
@@ -1129,7 +1129,7 @@ static unsigned gc_isr(unsigned cause) {
                 break;
             /* RX End */
             case 1:
-                //ets_printf("RX_END\n");
+                //esp_rom_printf("RX_END\n");
                 rmt_err_cnt[channel] = 0;
                 RMT.conf_ch[channel].conf1.rx_en = 0;
                 RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_SW;
@@ -1169,14 +1169,14 @@ static unsigned gc_isr(unsigned cause) {
                 RMT.conf_ch[channel].conf1.rx_en = 1;
 
                 /* The recovery above is a handful of register writes. The
-                 * printing is what costs: ets_printf blocks in the interrupt
+                 * printing is what costs: esp_rom_printf blocks in the interrupt
                  * until the UART drains. So say the first few per channel and
                  * then stay quiet, rather than turning a noisy line into a
                  * starved CPU. The count clears on the next good receive, so a
                  * channel that recovers can report again later. */
                 if (rmt_err_cnt[channel] < 4) {
                     rmt_err_cnt[channel]++;
-                    ets_printf("ERR ch%d\n", channel);
+                    esp_rom_printf("ERR ch%d\n", channel);
                 }
                 break;
             default:
@@ -1237,12 +1237,12 @@ void nsi_port_cfg(uint16_t mask) {
             PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[gpio_pin[i]], PIN_FUNC_GPIO);
             /* Bidirectional open-drain */
             gpio_set_direction_iram(gpio_pin[i], GPIO_MODE_INPUT_OUTPUT_OD);
-            gpio_matrix_out(gpio_pin[i], RMT_SIG_OUT0_IDX + rmt_ch[i][system], 0, 0);
-            gpio_matrix_in(gpio_pin[i], RMT_SIG_IN0_IDX + rmt_ch[i][system], 0);
+            esp_rom_gpio_connect_out_signal(gpio_pin[i], RMT_SIG_OUT0_IDX + rmt_ch[i][system], 0, 0);
+            esp_rom_gpio_connect_in_signal(gpio_pin[i], RMT_SIG_IN0_IDX + rmt_ch[i][system], 0);
         }
         else {
             gpio_reset_iram(gpio_pin[i]);
-            gpio_matrix_in(GPIO_MATRIX_CONST_ONE_INPUT, RMT_SIG_IN0_IDX + rmt_ch[i][system], 0);
+            esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT, RMT_SIG_IN0_IDX + rmt_ch[i][system], 0);
         }
         mask >>= 1;
     }

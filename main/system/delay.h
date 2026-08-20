@@ -6,7 +6,7 @@
 #ifndef _DELAY_H_
 #define _DELAY_H_
 
-#include "xtensa/core-macros.h"
+#include "esp_cpu.h"
 
 void delay_us(uint32_t delay_us);
 

@@ -7,8 +7,8 @@
 #include "soc/io_mux_reg.h"
 #include "esp_private/periph_ctrl.h"
 #include <soc/spi_periph.h>
-#include <esp32/rom/ets_sys.h>
-#include <esp32/rom/gpio.h>
+#include <esp_rom_sys.h>
+#include <esp_rom_gpio.h>
 #include "hal/clk_gate_ll.h"
 #include "driver/gpio.h"
 #include "system/intr.h"
@@ -203,12 +203,12 @@ void pcfx_spi_init(uint32_t package) {
         io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
         io_conf.pin_bit_mask = 1ULL << p->latch_pin;
         gpio_config_iram(&io_conf);
-        gpio_matrix_in(p->latch_pin, p->latch_sig, true); // Invert latch to use as CS
+        esp_rom_gpio_connect_in_signal(p->latch_pin, p->latch_sig, true); // Invert latch to use as CS
 
         /* Data */
         gpio_set_level_iram(p->data_pin, 1);
         gpio_set_direction_iram(p->data_pin, GPIO_MODE_OUTPUT);
-        gpio_matrix_out(p->data_pin, p->data_sig, true, false); // PCFX data is inverted
+        esp_rom_gpio_connect_out_signal(p->data_pin, p->data_sig, true, false); // PCFX data is inverted
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->data_pin], PIN_FUNC_GPIO);
 
         /* Clock */
@@ -218,7 +218,7 @@ void pcfx_spi_init(uint32_t package) {
         io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
         io_conf.pin_bit_mask = 1ULL << p->clk_pin;
         gpio_config_iram(&io_conf);
-        gpio_matrix_in(p->clk_pin, p->clk_sig, true);
+        esp_rom_gpio_connect_in_signal(p->clk_pin, p->clk_sig, true);
 
         periph_ll_enable_clk_clear_rst(p->spi_mod);
 

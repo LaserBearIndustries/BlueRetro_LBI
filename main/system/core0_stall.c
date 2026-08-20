@@ -15,9 +15,9 @@
 #include <stdint.h>
 #include <string.h>
 #include "esp_intr_alloc.h"
-#include "esp32/rom/ets_sys.h"
+#include "esp_rom_sys.h"
 #include "soc/dport_reg.h"
-#include "xtensa/core-macros.h"
+#include "esp_cpu.h"
 #include "sdkconfig.h"
 
 /* these global variables are accessed from interrupt vector, hence not declared as static */

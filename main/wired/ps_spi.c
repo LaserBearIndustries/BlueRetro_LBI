@@ -7,8 +7,8 @@
 #include "soc/io_mux_reg.h"
 #include "esp_private/periph_ctrl.h"
 #include <soc/spi_periph.h>
-#include <esp32/rom/ets_sys.h>
-#include <esp32/rom/gpio.h>
+#include <esp_rom_sys.h>
+#include <esp_rom_gpio.h>
 #include "hal/clk_gate_ll.h"
 #include "driver/gpio.h"
 #include "system/intr.h"
@@ -235,7 +235,7 @@ static void set_output_state(uint32_t port, uint32_t enable) {
         if (enable) {
             gpio_set_direction_iram(P1_DSR_PIN, GPIO_MODE_OUTPUT_OD);
             gpio_set_direction_iram(P1_RXD_PIN, GPIO_MODE_OUTPUT_OD);
-            gpio_matrix_out(P1_RXD_PIN, HSPIQ_OUT_IDX, false, false);
+            esp_rom_gpio_connect_out_signal(P1_RXD_PIN, HSPIQ_OUT_IDX, false, false);
         }
         else {
             gpio_set_direction_iram(P1_RXD_PIN, GPIO_MODE_INPUT);
@@ -246,7 +246,7 @@ static void set_output_state(uint32_t port, uint32_t enable) {
         if (enable) {
             gpio_set_direction_iram(P2_DSR_PIN, GPIO_MODE_OUTPUT_OD);
             gpio_set_direction_iram(P2_RXD_PIN, GPIO_MODE_OUTPUT_OD);
-            gpio_matrix_out(P2_RXD_PIN, VSPIQ_OUT_IDX, false, false);
+            esp_rom_gpio_connect_out_signal(P2_RXD_PIN, VSPIQ_OUT_IDX, false, false);
         }
         else {
             gpio_set_direction_iram(P2_RXD_PIN, GPIO_MODE_INPUT);
@@ -555,7 +555,7 @@ static void ps_cmd_rsp_hdlr(struct ps_ctrl_port *port, uint8_t id, uint8_t cmd, 
                     break;
             }
             if (cmd != 0x42 && cmd != 0x43) {
-                ets_printf("# P%d Ukn: %02X\n", id, cmd);
+                esp_rom_printf("# P%d Ukn: %02X\n", id, cmd);
             }
             break;
         }
@@ -592,7 +592,7 @@ static int32_t ps_mc_hdlr(struct ps_ctrl_port *port) {
     if (port->idx == MC_CMD) {
         port->mc_cmd = port->rx_buf[port->active_rx_buf][port->idx];
         if (!port->valid && port->mc_cmd != MC_CMD_GID) {
-            //ets_printf("M%d NOT GID\n", port->id);
+            //esp_rom_printf("M%d NOT GID\n", port->id);
             return -1;
         }
     }
@@ -621,14 +621,14 @@ static int32_t ps_mc_hdlr(struct ps_ctrl_port *port) {
                 case MC_LSB:
                     port->mc_addr |= port->rx_buf[port->active_rx_buf][port->idx];
                     port->tx_buf[MC_RD_LSB] = port->rx_buf[port->active_rx_buf][port->idx];
-                    //ets_printf("RD:ADDR:%03X\n", port->mc_addr);
+                    //esp_rom_printf("RD:ADDR:%03X\n", port->mc_addr);
                     break;
                 case MC_RD_AK2:
                     mc_read(port->mc_addr * MC_BLOCK_SIZE, &port->tx_buf[MC_RD_DAT], MC_BLOCK_SIZE);
                     for (uint32_t i = MC_RD_MSB; i < MC_RD_CRC; i++) {
                         port->tx_buf[MC_RD_CRC] ^= port->tx_buf[i];
                     }
-                    //ets_printf("RD:CRC:%02X\n", port->tx_buf[MC_RD_CRC]);
+                    //esp_rom_printf("RD:CRC:%02X\n", port->tx_buf[MC_RD_CRC]);
                     break;
             }
             break;
@@ -663,7 +663,7 @@ static int32_t ps_mc_hdlr(struct ps_ctrl_port *port) {
                 case MC_LSB:
                     port->mc_addr |= port->rx_buf[port->active_rx_buf][port->idx];
                     port->tx_buf[port->idx + 1] = port->rx_buf[port->active_rx_buf][port->idx];
-                    //ets_printf("WR:ADDR:%03X\n", port->mc_addr);
+                    //esp_rom_printf("WR:ADDR:%03X\n", port->mc_addr);
                     break;
                 case MC_WR_CRC:
                     port->mc_crc = 0;
@@ -671,7 +671,7 @@ static int32_t ps_mc_hdlr(struct ps_ctrl_port *port) {
                         port->mc_crc ^= port->rx_buf[port->active_rx_buf][i];
                     }
 
-                    //ets_printf("WR:CRC:%02X:%02X\n", port->mc_crc, port->rx_buf[port->active_rx_buf][MC_WR_CRC]);
+                    //esp_rom_printf("WR:CRC:%02X:%02X\n", port->mc_crc, port->rx_buf[port->active_rx_buf][MC_WR_CRC]);
 
                     if (port->mc_crc != port->rx_buf[port->active_rx_buf][MC_WR_CRC]) {
                         port->tx_buf[MC_WR_STS] = 0x4E;
@@ -759,7 +759,7 @@ static void packet_end(void *arg) {
                     case MC_CMD_WR:
                     {
                         if (port->valid) {
-                            //ets_printf("PE%d:WR\n", port->id);
+                            //esp_rom_printf("PE%d:WR\n", port->id);
                             if (port->mc_crc == port->rx_buf[port->active_rx_buf][MC_WR_CRC]) {
                                 mc_write(port->mc_addr * MC_BLOCK_SIZE, &port->rx_buf[port->active_rx_buf][MC_WR_DAT], MC_BLOCK_SIZE);
                             }
@@ -816,12 +816,12 @@ static void spi_isr(void* arg) {
                     port->tx_buf[2] = 0x5A;
                     port->tx_buf[3] = 0x5D;
                     port->tx_buf[4] = 0x00;
-                    //ets_printf("M%d EN\n", port->id);
+                    //esp_rom_printf("M%d EN\n", port->id);
                 }
                 else {
                     port->valid = 0;
                     port->mc_flags = 0x08;
-                    //ets_printf("M%d DIS\n", port->id);
+                    //esp_rom_printf("M%d DIS\n", port->id);
                 }
             }
             else {
@@ -1014,21 +1014,21 @@ inner_break:
     /* TXD */
     gpio_set_pull_mode_iram(P1_TXD_PIN, GPIO_PULLUP_ONLY);
     gpio_set_direction_iram(P1_TXD_PIN, GPIO_MODE_INPUT);
-    gpio_matrix_in(P1_TXD_PIN, HSPID_IN_IDX, false);
+    esp_rom_gpio_connect_in_signal(P1_TXD_PIN, HSPID_IN_IDX, false);
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P1_TXD_PIN], PIN_FUNC_GPIO);
     gpio_set_pull_mode_iram(P2_TXD_PIN, GPIO_PULLUP_ONLY);
     gpio_set_direction_iram(P2_TXD_PIN, GPIO_MODE_INPUT);
-    gpio_matrix_in(P2_TXD_PIN, VSPID_IN_IDX, false);
+    esp_rom_gpio_connect_in_signal(P2_TXD_PIN, VSPID_IN_IDX, false);
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P2_TXD_PIN], PIN_FUNC_GPIO);
 
     /* SCK */
     gpio_set_pull_mode_iram(P1_SCK_PIN, GPIO_PULLUP_ONLY);
     gpio_set_direction_iram(P1_SCK_PIN, GPIO_MODE_INPUT);
-    gpio_matrix_in(P1_SCK_PIN, HSPICLK_IN_IDX, false);
+    esp_rom_gpio_connect_in_signal(P1_SCK_PIN, HSPICLK_IN_IDX, false);
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P1_SCK_PIN], PIN_FUNC_GPIO);
     gpio_set_pull_mode_iram(P2_SCK_PIN, GPIO_PULLUP_ONLY);
     gpio_set_direction_iram(P2_SCK_PIN, GPIO_MODE_INPUT);
-    gpio_matrix_in(P2_SCK_PIN, VSPICLK_IN_IDX, false);
+    esp_rom_gpio_connect_in_signal(P2_SCK_PIN, VSPICLK_IN_IDX, false);
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P2_SCK_PIN], PIN_FUNC_GPIO);
 
     periph_ll_enable_clk_clear_rst(PERIPH_HSPI_MODULE);
@@ -1059,11 +1059,11 @@ void ps_spi_port_cfg(uint16_t mask) {
 
             io_conf.pin_bit_mask = 1ULL << gpio_pin[i];
             gpio_config_iram(&io_conf);
-            gpio_matrix_in(gpio_pin[i], signals[i], 0);
+            esp_rom_gpio_connect_in_signal(gpio_pin[i], signals[i], 0);
         }
         else {
             gpio_reset_iram(gpio_pin[i]);
-            gpio_matrix_in(GPIO_MATRIX_CONST_ONE_INPUT, signals[i], 0);
+            esp_rom_gpio_connect_in_signal(GPIO_MATRIX_CONST_ONE_INPUT, signals[i], 0);
         }
         mask >>= 1;
     }

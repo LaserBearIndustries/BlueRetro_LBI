@@ -4,7 +4,7 @@
  */
 
 #include <stdbool.h>
-#include <esp32/rom/ets_sys.h>
+#include <esp_rom_sys.h>
 #include <esp_cpu.h>
 #include "intr.h"
 

@@ -9,7 +9,7 @@
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <soc/soc_memory_layout.h>
-#include "xtensa/core-macros.h"
+#include "esp_cpu.h"
 #include "sdkconfig.h"
 #include "system/fs.h"
 #include "config.h"

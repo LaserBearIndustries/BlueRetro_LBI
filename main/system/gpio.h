@@ -16,7 +16,7 @@
 #define _GPIO_H_
 
 #include "soc/gpio_sig_map.h"
-#include "esp32/rom/gpio.h"
+#include "esp_rom_gpio.h"
 #include "soc/gpio_struct.h"
 #include "hal/gpio_types.h"
 #include "driver/gpio.h"

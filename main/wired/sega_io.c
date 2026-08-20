@@ -4,7 +4,7 @@
  */
 
 #include <string.h>
-#include <esp32/rom/ets_sys.h>
+#include <esp_rom_sys.h>
 #include "zephyr/types.h"
 #include "tools/util.h"
 #include "adapter/adapter.h"
@@ -843,7 +843,7 @@ static void sega_saturn_task(void) {
                     set_sega_mouse(0, mt_first_port[0]);
                     break;
                 default:
-                    ets_printf("BADTYPE%s\n", dev_type[0]);
+                    esp_rom_printf("BADTYPE%s\n", dev_type[0]);
             }
             if (GPIO.in1.val & BIT(P1_TH_PIN - 32)) {
                 goto p1_set_id0_hi;
@@ -881,7 +881,7 @@ p1_set_id0_hi:
                     set_sega_mouse(1, mt_first_port[1]);
                     break;
                 default:
-                    ets_printf("BADTYPE%s\n", dev_type[1]);
+                    esp_rom_printf("BADTYPE%s\n", dev_type[1]);
             }
             if (GPIO.in1.val & BIT(P2_TH_PIN - 32)) {
                 goto p2_set_id0_hi;
@@ -1164,7 +1164,7 @@ void sega_io_init(uint32_t package) {
                 }
                 break;
             default:
-                ets_printf("Unsupported dev type: %d\n", dev_type[i]);
+                esp_rom_printf("Unsupported dev type: %d\n", dev_type[i]);
         }
     }
 

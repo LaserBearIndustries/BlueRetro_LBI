@@ -7,8 +7,8 @@
 #include "soc/io_mux_reg.h"
 #include "esp_private/periph_ctrl.h"
 #include <soc/spi_periph.h>
-#include <esp32/rom/ets_sys.h>
-#include <esp32/rom/gpio.h>
+#include <esp_rom_sys.h>
+#include <esp_rom_gpio.h>
 #include "hal/clk_gate_ll.h"
 #include "driver/gpio.h"
 #include "system/intr.h"
@@ -207,12 +207,12 @@ void real_spi_init(uint32_t package) {
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     io_conf.pin_bit_mask = 1ULL << P1_CS_IN_PIN;
     gpio_config_iram(&io_conf);
-    gpio_matrix_in(P1_CS_IN_PIN, HSPICS0_IN_IDX, false);
+    esp_rom_gpio_connect_in_signal(P1_CS_IN_PIN, HSPICS0_IN_IDX, false);
 
     /* RXD */
     gpio_set_level_iram(P1_RXD_PIN, 1);
     gpio_set_direction_iram(P1_RXD_PIN, GPIO_MODE_OUTPUT);
-    gpio_matrix_out(P1_RXD_PIN, HSPIQ_OUT_IDX, false, false);
+    esp_rom_gpio_connect_out_signal(P1_RXD_PIN, HSPIQ_OUT_IDX, false, false);
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P1_RXD_PIN], PIN_FUNC_GPIO);
 
     /* SCK */
@@ -222,7 +222,7 @@ void real_spi_init(uint32_t package) {
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     io_conf.pin_bit_mask = 1ULL << P1_SCK_PIN;
     gpio_config_iram(&io_conf);
-    gpio_matrix_in(P1_SCK_PIN, HSPICLK_IN_IDX, false);
+    esp_rom_gpio_connect_in_signal(P1_SCK_PIN, HSPICLK_IN_IDX, false);
 
     periph_ll_enable_clk_clear_rst(PERIPH_HSPI_MODULE);
 

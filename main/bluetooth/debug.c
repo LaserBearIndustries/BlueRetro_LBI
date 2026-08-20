@@ -5,7 +5,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
-#include <xtensa/hal.h>
+#include <esp_cpu.h>
 #include <driver/gpio.h>
 #include "sdkconfig.h"
 #include "tools/stats.h"
@@ -16,7 +16,7 @@ static uint32_t start, end;
 
 void bt_dbg_init(uint8_t dev_type) {
     end = 0;
-    start = xthal_get_ccount();
+    start = esp_cpu_get_cycle_count();
     counter = 0;
     type = dev_type;
 }
@@ -26,14 +26,14 @@ void bt_dbg(uint8_t *data, uint16_t len) {
         float average, max, min, std_dev;
         uint32_t interval;
 
-        end = xthal_get_ccount();
+        end = esp_cpu_get_cycle_count();
         counter++;
 
         if (end > start) {
-            interval = (end - start)/CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ;
+            interval = (end - start)/CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ;
         }
         else {
-            interval = ((0xFFFFFFFF - start) + end)/CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ;
+            interval = ((0xFFFFFFFF - start) + end)/CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ;
         }
         start = end;
 

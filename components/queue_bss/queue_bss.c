@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include "esp32/rom/ets_sys.h"
+#include "esp_rom_sys.h"
 #include "liblfds711.h"
 #include "queue_bss.h"
 
@@ -51,7 +51,7 @@ queue_bss_handle_t queue_bss_init(uint32_t item_num, uint32_t item_len) {
     for (uint32_t i = 0; i < (item_num - 1); i++, cur_ptr += item_len) {
         q->item_len[i] = 0;
         if (!lfds711_queue_bss_enqueue(&q->item_free_state, &q->item_len[i], cur_ptr)) {
-            ets_printf("queue_bss: Enqueue fail %d\n", i);
+            esp_rom_printf("queue_bss: Enqueue fail %d\n", i);
             goto free_item_free_queue;
         }
     }
@@ -72,7 +72,7 @@ free_item_queue_element:
     free(q->item_queue_element);
 free_q:
     free(q);
-    ets_printf("queue_bss: Init fail\n");
+    esp_rom_printf("queue_bss: Init fail\n");
     return NULL;
 }
 
@@ -86,24 +86,24 @@ int32_t queue_bss_enqueue(queue_bss_handle_t qhdl, uint8_t *item, uint32_t item_
     uint32_t *qitem_len;
 
     if (NULL == q) {
-        ets_printf("queue_bss: NULL handle\n");
+        esp_rom_printf("queue_bss: NULL handle\n");
         return -1;
     }
 
     if (item_len > q->item_max_len) {
-        ets_printf("queue_bss: Item too large %d, max: %d\n", item_len, q->item_max_len);
+        esp_rom_printf("queue_bss: Item too large %d, max: %d\n", item_len, q->item_max_len);
         return -1;
     }
 
     if (!lfds711_queue_bss_dequeue(&q->item_free_state, (void **)&qitem_len, (void **)&qitem)) {
-        //ets_printf("queue_bss: No free slot\n");
+        //esp_rom_printf("queue_bss: No free slot\n");
         return -1;
     }
     memcpy(qitem, item, item_len);
     *qitem_len = item_len;
 
     if (!lfds711_queue_bss_enqueue(&q->item_queue_state, qitem_len, qitem)) {
-        ets_printf("queue_bss: Queue full!\n");
+        esp_rom_printf("queue_bss: Queue full!\n");
         queue_bss_return(qhdl, qitem, qitem_len);
         return -1;
     }
@@ -116,7 +116,7 @@ uint8_t *queue_bss_dequeue(queue_bss_handle_t qhdl, uint32_t **item_len) {
     uint32_t *qitem_len;
 
     if (NULL == q || NULL == item_len) {
-        ets_printf("queue_bss: NULL paramters\n");
+        esp_rom_printf("queue_bss: NULL paramters\n");
         return NULL;
     }
 
@@ -132,7 +132,7 @@ int32_t queue_bss_return(queue_bss_handle_t qhdl, uint8_t *item, uint32_t *item_
     struct queue_bss *q = (struct queue_bss *)qhdl;
 
     if (NULL == q || NULL == item || NULL == item_len) {
-        ets_printf("queue_bss: NULL paramters\n");
+        esp_rom_printf("queue_bss: NULL paramters\n");
         return -1;
     }
 
@@ -146,7 +146,7 @@ void queue_bss_deinit(queue_bss_handle_t qhdl) {
     struct queue_bss *q = (struct queue_bss *)qhdl;
 
     if (NULL == q) {
-        ets_printf("queue_bss: NULL handle\n");
+        esp_rom_printf("queue_bss: NULL handle\n");
         return;
     }
 

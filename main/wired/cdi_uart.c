@@ -10,8 +10,8 @@
 #include <hal/clk_gate_ll.h>
 #include <soc/uart_periph.h>
 #include <hal/uart_ll.h>
-#include <esp32/rom/ets_sys.h>
-#include <esp32/rom/gpio.h>
+#include <esp_rom_sys.h>
+#include <esp_rom_gpio.h>
 #include "esp_private/esp_clk.h"
 #include "zephyr/types.h"
 #include "tools/util.h"
@@ -309,7 +309,7 @@ void cdi_uart_init(uint32_t package) {
         /* Data */
         gpio_set_direction_iram(p->data_pin, GPIO_MODE_OUTPUT);
         gpio_set_level_iram(p->data_pin, 1);
-        gpio_matrix_out(p->data_pin, p->data_sig, false, false);
+        esp_rom_gpio_connect_out_signal(p->data_pin, p->data_sig, false, false);
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->data_pin], PIN_FUNC_GPIO);
 
         periph_ll_enable_clk_clear_rst(p->uart_mod);

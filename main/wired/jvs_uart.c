@@ -11,8 +11,8 @@
 #include <hal/clk_gate_ll.h>
 #include <soc/uart_periph.h>
 #include <hal/uart_ll.h>
-#include <esp32/rom/ets_sys.h>
-#include <esp32/rom/gpio.h>
+#include <esp_rom_sys.h>
+#include <esp_rom_gpio.h>
 #include "esp_private/esp_clk.h"
 #include "zephyr/types.h"
 #include "tools/util.h"
@@ -128,7 +128,7 @@ static void jvs_parser(uint8_t *rx_buf, uint32_t rx_len, uint8_t *tx_buf, uint32
                     jvs++;
                     break;
                 case 0xF2: /* Set Speed */
-                    ets_printf("0xF2 NA\n");
+                    esp_rom_printf("0xF2 NA\n");
                     jvs += 2;
                     break;
                 case 0x10: /* Get Info */
@@ -173,7 +173,7 @@ static void jvs_parser(uint8_t *rx_buf, uint32_t rx_len, uint8_t *tx_buf, uint32
                     tx_buf[len++] = 0x00;
                     break;
                 case 0x15: /* Set Info */
-                    ets_printf("%s\n", jvs);
+                    esp_rom_printf("%s\n", jvs);
                     while (*jvs++ != 0);
                     tx_buf[len++] = 0x01;
                     break;
@@ -224,7 +224,7 @@ static void jvs_parser(uint8_t *rx_buf, uint32_t rx_len, uint8_t *tx_buf, uint32
                     break;
                 default:
                     /* Unsupported cmd, discard everything and return error */
-                    ets_printf("0x%02X NA\n", *jvs);
+                    esp_rom_printf("0x%02X NA\n", *jvs);
                     tx_buf[1] = 0x03;
                     tx_buf[2] = 0x02;
                     tx_buf[3] = 0x01;
@@ -250,17 +250,17 @@ static unsigned uart_rx(unsigned cause) {
         uint16_t read_len = uart_ll_get_rxfifo_len(&UART1);
 
         if (!jvs_read_rxfifo(rx_buf, read_len, &rx_len)) {
-            ets_printf("BAD\n");
+            esp_rom_printf("BAD\n");
         }
 #ifdef CONFIG_BLUERETRO_WIRED_TRACE
         if (rx_len) {
             for (uint32_t i = 0; i < rx_len; ++i) {
-                ets_printf("%02X", rx_buf[i]);
+                esp_rom_printf("%02X", rx_buf[i]);
             }
-            ets_printf("\n");
+            esp_rom_printf("\n");
         }
         else {
-            ets_printf("T\n");
+            esp_rom_printf("T\n");
         }
 #else
         jvs_parser(rx_buf, rx_len, tx_buf, &tx_len);
@@ -273,7 +273,7 @@ static unsigned uart_rx(unsigned cause) {
         }
     }
     if (intr_status & UART_INTR_RXFIFO_OVF) {
-        ets_printf("RXFIFO_OVF\n");
+        esp_rom_printf("RXFIFO_OVF\n");
         uart_ll_rxfifo_rst(&UART1);
     }
     if (intr_status & UART_INTR_TX_DONE) {
@@ -311,13 +311,13 @@ void jvs_init(uint32_t package) {
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[JVS_TX_PIN], PIN_FUNC_GPIO);
     gpio_set_direction_iram(JVS_TX_PIN, GPIO_MODE_INPUT_OUTPUT);
     gpio_set_level_iram(JVS_TX_PIN, 1);
-    gpio_matrix_out(JVS_TX_PIN, U1TXD_OUT_IDX, false, false);
+    esp_rom_gpio_connect_out_signal(JVS_TX_PIN, U1TXD_OUT_IDX, false, false);
 
     /* JVS_RX is input */
     PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[JVS_RX_PIN], PIN_FUNC_GPIO);
     gpio_set_pull_mode_iram(JVS_RX_PIN, GPIO_PULLUP_ONLY);
     gpio_set_direction_iram(JVS_RX_PIN, GPIO_MODE_INPUT);
-    gpio_matrix_in(JVS_RX_PIN, U1RXD_IN_IDX, false);
+    esp_rom_gpio_connect_in_signal(JVS_RX_PIN, U1RXD_IN_IDX, false);
 
     //Configure UART
     UART1.int_ena.val &= (~0x7ffff);

@@ -4,7 +4,7 @@
  */
 
 #include <stdio.h>
-#include <esp32/rom/crc.h>
+#include <esp_rom_crc.h>
 #include <esp_timer.h>
 #include "adapter/adapter.h"
 #include "adapter/config.h"
@@ -21,7 +21,7 @@ static void bt_hid_cmd_ps4_set_conf(struct bt_dev *device, void *report) {
 
     memcpy((void *)set_conf, report, sizeof(*set_conf));
 
-    set_conf->crc = crc32_le((uint32_t)~0xFFFFFFFF, (void *)&bt_hci_pkt_tmp.hidp_hdr,
+    set_conf->crc = esp_rom_crc32_le((uint32_t)~0xFFFFFFFF, (void *)&bt_hci_pkt_tmp.hidp_hdr,
         sizeof(bt_hci_pkt_tmp.hidp_hdr) + sizeof(*set_conf) - sizeof(set_conf->crc));
 
     bt_hid_cmd(device->acl_handle, device->intr_chan.dcid, BT_HIDP_DATA_OUT, BT_HIDP_PS4_SET_CONF, sizeof(*set_conf));
@@ -161,7 +161,7 @@ static void bt_hid_cmd_ps5_set_conf(struct bt_dev *device, void *report) {
 
     memcpy((void *)set_conf, report, sizeof(*set_conf));
 
-    set_conf->crc = crc32_le((uint32_t)~0xFFFFFFFF, (void *)&bt_hci_pkt_tmp.hidp_hdr,
+    set_conf->crc = esp_rom_crc32_le((uint32_t)~0xFFFFFFFF, (void *)&bt_hci_pkt_tmp.hidp_hdr,
         sizeof(bt_hci_pkt_tmp.hidp_hdr) + sizeof(*set_conf) - sizeof(set_conf->crc));
 
     bt_hid_cmd(device->acl_handle, device->intr_chan.dcid, BT_HIDP_DATA_OUT, BT_HIDP_PS5_SET_CONF, sizeof(*set_conf));

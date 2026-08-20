@@ -9,7 +9,7 @@
 #include <time.h>
 #include <stdio.h>
 #include <string.h>
-#include <esp32/rom/ets_sys.h>
+#include <esp_rom_sys.h>
 #include "devcrypto.h"
 
 typedef unsigned short u16;
@@ -252,8 +252,8 @@ void wiimote_gen_key(wiimote_key *key, u8 *keydata)
 	for(i=0;i<6;i++)
 		skey[i] = keydata[i+10];
 	
-	ets_printf("# rand: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n", rand[0], rand[1], rand[2], rand[3], rand[4], rand[5], rand[6], rand[7], rand[8], rand[9]);
-	ets_printf("# key:  %02x %02x %02x %02x %02x %02x\n", skey[0], skey[1], skey[2], skey[3], skey[4], skey[5]);
+	esp_rom_printf("# rand: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n", rand[0], rand[1], rand[2], rand[3], rand[4], rand[5], rand[6], rand[7], rand[8], rand[9]);
+	esp_rom_printf("# key:  %02x %02x %02x %02x %02x %02x\n", skey[0], skey[1], skey[2], skey[3], skey[4], skey[5]);
 	
 	for(idx=0;idx<7;idx++) {
 		genkey(rand, idx, testkey);
@@ -261,12 +261,12 @@ void wiimote_gen_key(wiimote_key *key, u8 *keydata)
 			break;
 	}
 	// default case is idx = 7 which is valid (homebrew uses it for the 0x17 case)
-	ets_printf("# idx:  %d\n", idx);
+	esp_rom_printf("# idx:  %d\n", idx);
 	
 	gentabs(rand, skey, idx, key->ft, key->sb);
 	
-	ets_printf("# ft:   %02x %02x %02x %02x %02x %02x %02x %02x\n", key->ft[0], key->ft[1], key->ft[2], key->ft[3], key->ft[4], key->ft[5], key->ft[6], key->ft[7]);
-	ets_printf("# sb:   %02x %02x %02x %02x %02x %02x %02x %02x\n", key->sb[0], key->sb[1], key->sb[2], key->sb[3], key->sb[4], key->sb[5], key->sb[6], key->sb[7]);
+	esp_rom_printf("# ft:   %02x %02x %02x %02x %02x %02x %02x %02x\n", key->ft[0], key->ft[1], key->ft[2], key->ft[3], key->ft[4], key->ft[5], key->ft[6], key->ft[7]);
+	esp_rom_printf("# sb:   %02x %02x %02x %02x %02x %02x %02x %02x\n", key->sb[0], key->sb[1], key->sb[2], key->sb[3], key->sb[4], key->sb[5], key->sb[6], key->sb[7]);
 	
 	// for homebrew, ft and sb are all 0x97 which is equivalent to 0x17
 }

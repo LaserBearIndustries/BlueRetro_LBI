@@ -8,7 +8,7 @@
 #include <freertos/task.h>
 #include <nvs_flash.h>
 #include <esp_ota_ops.h>
-#include <esp32/rom/ets_sys.h>
+#include <esp_rom_sys.h>
 #include <soc/efuse_reg.h>
 #include <esp_efuse.h>
 #include "system/bare_metal_app_cpu.h"
@@ -51,11 +51,11 @@ static void wired_init_task(void) {
     detect_deinit();
 
     if (wired_adapter.system_id >= 0) {
-        ets_printf("# Detected system : %d: %s\n", wired_adapter.system_id, wired_get_sys_name());
+        esp_rom_printf("# Detected system : %d: %s\n", wired_adapter.system_id, wired_get_sys_name());
     }
 #else
     wired_adapter.system_id = HARDCODED_SYS;
-    ets_printf("# Hardcoded system : %d: %s\n", wired_adapter.system_id, wired_get_sys_name());
+    esp_rom_printf("# Hardcoded system : %d: %s\n", wired_adapter.system_id, wired_get_sys_name());
 #endif
 
     while (config.magic != CONFIG_MAGIC) {
@@ -64,7 +64,7 @@ static void wired_init_task(void) {
 
     if (config.global_cfg.system_cfg < WIRED_MAX && config.global_cfg.system_cfg != WIRED_AUTO) {
         wired_adapter.system_id = config.global_cfg.system_cfg;
-        ets_printf("# Config override system : %d: %s\n", wired_adapter.system_id, wired_get_sys_name());
+        esp_rom_printf("# Config override system : %d: %s\n", wired_adapter.system_id, wired_get_sys_name());
     }
 
     for (uint32_t i = 0; i < WIRED_MAX_DEV; i++) {

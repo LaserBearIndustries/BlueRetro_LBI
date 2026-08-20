@@ -5,7 +5,7 @@
 
 #include <string.h>
 #include <esp_timer.h>
-#include <esp32/rom/ets_sys.h>
+#include <esp_rom_sys.h>
 #include <soc/efuse_reg.h>
 #include "zephyr/types.h"
 #include "tools/util.h"
@@ -348,21 +348,21 @@ maple_end:
 
 #ifdef CONFIG_BLUERETRO_WIRED_TRACE
         pre_us = cur_us;
-        cur_us = xthal_get_ccount();;
-        ets_printf("+%07u: ", (cur_us - pre_us)/CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ);
+        cur_us = esp_cpu_get_cycle_count();;
+        esp_rom_printf("+%07u: ", (cur_us - pre_us)/CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);
         byte = ((bit_cnt - 1) / 8);
         if (bad_frame) {
             ++byte;
             for (uint32_t i = 0; i < byte; ++i) {
-                ets_printf("%02X", maple_fix_byte(bad_frame, pkt.data[i ? i - 1 : 0], pkt.data[i]));
+                esp_rom_printf("%02X", maple_fix_byte(bad_frame, pkt.data[i ? i - 1 : 0], pkt.data[i]));
             }
         }
         else {
             for (uint32_t i = 0; i < byte; ++i) {
-                ets_printf("%02X", pkt.data[i]);
+                esp_rom_printf("%02X", pkt.data[i]);
             }
         }
-        ets_printf("\n");
+        esp_rom_printf("\n");
 #else
         len = ((bit_cnt - 1) / 32) - 1;
         byte = ((bit_cnt - 1) / 8);
@@ -412,7 +412,7 @@ maple_end:
                                 ++wired_adapter.data[port].frame_cnt;
                                 break;
                             default:
-                                ets_printf("%02X: Unk cmd: 0x%02X\n", dst, cmd);
+                                esp_rom_printf("%02X: Unk cmd: 0x%02X\n", dst, cmd);
                                 break;
                         }
                         break;
@@ -446,7 +446,7 @@ maple_end:
                                 ++wired_adapter.data[port].frame_cnt;
                                 break;
                             default:
-                                ets_printf("%02X: Unk cmd: 0x%02X\n", dst, cmd);
+                                esp_rom_printf("%02X: Unk cmd: 0x%02X\n", dst, cmd);
                                 break;
                         }
                         break;
@@ -496,7 +496,7 @@ maple_end:
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
                             default:
-                                ets_printf("%02X: Unk cmd: 0x%02X\n", dst, cmd);
+                                esp_rom_printf("%02X: Unk cmd: 0x%02X\n", dst, cmd);
                                 break;
                         }
                         break;
@@ -562,7 +562,7 @@ maple_end:
                                 }
                                 break;
                             default:
-                                ets_printf("%02X: Unk cmd: 0x%02X\n", dst, cmd);
+                                esp_rom_printf("%02X: Unk cmd: 0x%02X\n", dst, cmd);
                                 break;
                         }
                         break;
@@ -575,7 +575,7 @@ maple_end:
                         func.bytes[3] = maple_fix_byte(bad_frame, pkt.data[6], pkt.data[7]);
                         block_no = maple_fix_byte(bad_frame, pkt.data[7], pkt.data[8]);
                         phase = maple_fix_byte(bad_frame, pkt.data[9], pkt.data[10]);
-                        // ets_printf("%ld S: %ld C: %02X F: %08X B: %02X P: %02X\n", bad_frame, byte, cmd, func.val, block_no, phase);
+                        // esp_rom_printf("%ld S: %ld C: %02X F: %08X B: %02X P: %02X\n", bad_frame, byte, cmd, func.val, block_no, phase);
                         switch(cmd) {
                             case CMD_INFO_REQ:
                             case CMD_EXT_INFO_REQ:
@@ -609,32 +609,32 @@ maple_end:
                                 break;
                             case CMD_BLOCK_READ:
                                 if (func.val != ID_VMU_MEM) {
-                                    ets_printf("RD ERR func: 0x%08X\n", pkt.data32[0]);
+                                    esp_rom_printf("RD ERR func: 0x%08X\n", pkt.data32[0]);
                                 }
                                 pkt.len = 0x82;
                                 pkt.cmd = CMD_DATA_TX;
                                 pkt.data32[0] = func.val;
                                 pkt.data32[1] = (phase << 16) | block_no;
                                 if (phase) {
-                                    ets_printf("RD ERR phase: %d, expected 0\n", phase);
+                                    esp_rom_printf("RD ERR phase: %d, expected 0\n", phase);
                                 }
                                 mc_read(block_no * VMU_BLOCK_SIZE, (void *)&pkt.data32[2], VMU_BLOCK_SIZE);
                                 crc = maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
-                                // ets_printf("R: %02X %d %02X\n", block_no, phase, crc);
+                                // esp_rom_printf("R: %02X %d %02X\n", block_no, phase, crc);
                                 break;
                             case CMD_BLOCK_WRITE:
                                 // if (pkt.len != (32 + 2) && func.val == ID_VMU_MEM) {
-                                //     ets_printf("WR ERR: %d words, expected 34\n", pkt.len);
+                                //     esp_rom_printf("WR ERR: %d words, expected 34\n", pkt.len);
                                 // }
                                 // if (func.val == ID_VMU_MEM) {
                                 //     if (crc != pkt.data[pkt.len * 4 + 4]) {
-                                //         ets_printf("CRC ERR: 0x%02X, 0x%02X\n", pkt.data[pkt.len * 4 + 4], crc);
+                                //         esp_rom_printf("CRC ERR: 0x%02X, 0x%02X\n", pkt.data[pkt.len * 4 + 4], crc);
                                 //     }
                                 // }
                                 pkt.len = 0x00;
                                 pkt.cmd = CMD_ACK;
                                 if (func.val == ID_VMU_MEM) {
-                                    // ets_printf("W: %02X %d %02X\n", block_no, phase, crc);
+                                    // esp_rom_printf("W: %02X %d %02X\n", block_no, phase, crc);
                                     if (bad_frame) {
                                         for (uint32_t i = 0; i < 128; i++) {
                                             uint8_t mc_data = maple_fix_byte(bad_frame, pkt.data[i + 11], pkt.data[i + 12]);
@@ -653,7 +653,7 @@ maple_end:
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
                             default:
-                                ets_printf("%02X: Unk cmd: %02X %02X %ld\n", dst, cmd, crc, byte);
+                                esp_rom_printf("%02X: Unk cmd: %02X %02X %ld\n", dst, cmd, crc, byte);
                                 break;
                         }
                         break;

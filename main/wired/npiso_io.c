@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <esp32/rom/ets_sys.h>
+#include <esp_rom_sys.h>
 #include "system/intr.h"
 #include "system/gpio.h"
 #include "system/delay.h"
@@ -708,7 +708,7 @@ void npiso_init(uint32_t package)
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     gpio_config_iram(&io_conf);
     if (GPIO.in1.val & (1U << (FC_ONLY_MODE_PIN - 32))) {
-        ets_printf("# Famicom only mode enable\n");
+        esp_rom_printf("# Famicom only mode enable\n");
         gpio_pins[0][NPISO_D0] = P1_D1_PIN;
         gpio_mask[0][NPISO_D0] = P1_D1_MASK;
         if (!(dev_type[0] == DEV_FC_KB)) {

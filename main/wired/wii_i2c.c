@@ -10,8 +10,8 @@
 #include "soc/io_mux_reg.h"
 #include "esp_private/periph_ctrl.h"
 #include <soc/i2c_periph.h>
-#include <esp32/rom/ets_sys.h>
-#include <esp32/rom/gpio.h>
+#include <esp_rom_sys.h>
+#include <esp_rom_gpio.h>
 #include "hal/i2c_ll.h"
 #include "hal/clk_gate_ll.h"
 #include "hal/misc.h"
@@ -149,7 +149,7 @@ static inline void write_fifo(struct wii_ctrl_port *port, uint8_t reg, uint32_t 
     }
     if (debug) {
         for (uint32_t i = 0; i < len; i++) {
-            ets_printf("%02X ", port->tmp[i]);
+            esp_rom_printf("%02X ", port->tmp[i]);
         }
     }
 }
@@ -196,9 +196,9 @@ static inline void update_status(struct wii_ctrl_port *port, const uint8_t *data
             axes[5] = tmp[3] & 0x1F;
 
             for (i = 0; i < 6; i++) {
-                ets_printf("%02X ", axes[i]);
+                esp_rom_printf("%02X ", axes[i]);
             }
-            ets_printf("\n");
+            esp_rom_printf("\n");
 #endif
             break;
         case 0x02:
@@ -237,19 +237,19 @@ static void i2c_isr(void* arg) {
             if (rx_fifo_cnt) {
                 /* Write registers */
                 uint32_t update_key = 0;
-                ets_printf("W%02X: ", reg);
+                esp_rom_printf("W%02X: ", reg);
                 if (reg >= 0x40 && reg < 0x50) {
                     update_key = 1;
                 }
                 for (uint32_t i = 0; i < rx_fifo_cnt; i++, reg++) {
                     uint8_t val = HAL_FORCE_READ_U32_REG_FIELD(port->hw->fifo_data, data);
                     port->reg[reg] = val;
-                    ets_printf("%02X ", val);
+                    esp_rom_printf("%02X ", val);
                     if (reg == 0xFF) {
                         break;
                     }
                 }
-                ets_printf("\n");
+                esp_rom_printf("\n");
                 if (update_key) {
                     wiimote_gen_key(&port->key, &port->reg[0x40]);
                 }
@@ -268,9 +268,9 @@ static void i2c_isr(void* arg) {
                     if (len > 32) {
                         len = 32;
                     }
-                    ets_printf("R%02X: ", reg);
+                    esp_rom_printf("R%02X: ", reg);
                     write_fifo(port, reg, len, 1);
-                    ets_printf("\n");
+                    esp_rom_printf("\n");
                 }
             }
         }
@@ -308,15 +308,15 @@ void wii_i2c_init(uint32_t package) {
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->sda_pin], PIN_FUNC_GPIO);
         gpio_set_direction_iram(p->sda_pin, GPIO_MODE_INPUT_OUTPUT_OD);
         gpio_set_pull_mode_iram(p->sda_pin, GPIO_PULLUP_ONLY);
-        gpio_matrix_out(p->sda_pin, p->sda_out_sig, false, false);
-        gpio_matrix_in(p->sda_pin, p->sda_in_sig, false);
+        esp_rom_gpio_connect_out_signal(p->sda_pin, p->sda_out_sig, false, false);
+        esp_rom_gpio_connect_in_signal(p->sda_pin, p->sda_in_sig, false);
 
         /* Clock */
         gpio_set_level_iram(p->scl_pin, 1);
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->scl_pin], PIN_FUNC_GPIO);
         gpio_set_direction_iram(p->scl_pin, GPIO_MODE_INPUT_OUTPUT_OD);
-        gpio_matrix_out(p->scl_pin, p->scl_out_sig, false, false);
-        gpio_matrix_in(p->scl_pin, p->scl_in_sig, false);
+        esp_rom_gpio_connect_out_signal(p->scl_pin, p->scl_out_sig, false, false);
+        esp_rom_gpio_connect_in_signal(p->scl_pin, p->scl_in_sig, false);
         gpio_set_pull_mode_iram(p->scl_pin, GPIO_PULLUP_ONLY);
 
         periph_ll_enable_clk_clear_rst(p->module);
