@@ -623,8 +623,20 @@ static void n64_pad_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
                     uint32_t addr = (buf[0] << 8) | (buf[1] & 0xE0);
 
                     if (addr < 0x8000) {
+                        const uint8_t *pak;
+
+                        /* Four paks banked across the whole buffer, so this
+                         * reaches the very top of it. */
                         addr += ((channel + ctrl_mem_banksel) & 0x3) * 32 * 1024;
-                        item = nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, mc_get_ptr(addr), 32, &crc, STOP_BIT_2US);
+                        pak = mc_get_ptr(addr);
+
+                        /* Nothing behind that address means the boot where
+                         * the buffer could not be allocated; main() lights
+                         * the error LED and carries on rather than stopping.
+                         * An absent pak reads as empty, which is what the
+                         * branches either side of this send anyway. */
+                        item = nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM,
+                            pak ? pak : empty, 32, &crc, STOP_BIT_2US);
                     }
                     else {
                         item = nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, empty, 32, &crc, STOP_BIT_2US);

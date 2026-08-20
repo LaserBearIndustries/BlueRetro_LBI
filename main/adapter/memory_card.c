@@ -170,13 +170,36 @@ void mc_storage_update(void) {
 }
 
 /* Assume r/w size will never cross blocks boundary */
+
+/* The block index is not checked anywhere above these, and the callers
+ * compute it from addresses the console supplies. The N64 pak path in
+ * particular banks four 32 KB paks across the buffer and so reaches the
+ * very top of it, which was past the end for as long as a GameCube build
+ * had 96 KB - a stray pointer, dereferenced from an interrupt.
+ *
+ * A compare against a constant costs nothing on this path and does not
+ * care what the buffer is sized at next. The NULL test is for the boot
+ * where the allocation failed: main() lights the error LED and carries on
+ * rather than stopping, so these can still be called with nothing behind
+ * them. A read of absent memory answers zeros, a write to it is dropped. */
 void IRAM_ATTR mc_read(uint32_t addr, uint8_t *data, uint32_t size) {
-    memcpy(data, mc_buffer[addr >> 12] + (addr & 0xFFF), size);
+    uint32_t block = addr >> 12;
+
+    if (block >= MC_BUFFER_BLOCK_CNT || mc_buffer[block] == NULL) {
+        memset(data, 0, size);
+        return;
+    }
+
+    memcpy(data, mc_buffer[block] + (addr & 0xFFF), size);
 }
 
 void IRAM_ATTR mc_write(uint32_t addr, uint8_t *data, uint32_t size) {
     struct raw_fb fb_data = {0};
     uint32_t block = addr >> 12;
+
+    if (block >= MC_BUFFER_BLOCK_CNT || mc_buffer[block] == NULL) {
+        return;
+    }
 
     memcpy(mc_buffer[block] + (addr & 0xFFF), data, size);
 
@@ -191,7 +214,13 @@ void IRAM_ATTR mc_write(uint32_t addr, uint8_t *data, uint32_t size) {
 }
 
 uint8_t IRAM_ATTR *mc_get_ptr(uint32_t addr) {
-    return mc_buffer[addr >> 12] + (addr & 0xFFF);
+    uint32_t block = addr >> 12;
+
+    if (block >= MC_BUFFER_BLOCK_CNT) {
+        return NULL;
+    }
+
+    return mc_buffer[block] ? mc_buffer[block] + (addr & 0xFFF) : NULL;
 }
 
 uint32_t IRAM_ATTR mc_get_state(void) {
