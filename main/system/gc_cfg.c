@@ -109,6 +109,16 @@ void IRAM_ATTR gc_cfg_cmd(const uint8_t *payload) {
         case GC_CFG_SUB_ABORT:
             cfg_state = GC_CFG_ST_IDLE;
             break;
+        case GC_CFG_SUB_DEFAULTS:
+            /* Handed over for the same reason as apply: it writes flash.
+             * Deliberately not gated on ST_READY - there is nothing to
+             * stage, and refusing unless a restore was already under way
+             * would be refusing the recovery path. */
+            cfg_why = GC_CFG_WHY_NONE;
+            cfg_detail = 0;
+            cfg_state = GC_CFG_ST_BUSY;
+            cfg_req = GC_CFG_SUB_DEFAULTS;
+            break;
     }
 }
 
@@ -176,7 +186,17 @@ void gc_cfg_service(void) {
     if (req != GC_CFG_REQ_NONE) {
         cfg_req = GC_CFG_REQ_NONE;
 
-        if (gc_cfg_staged_is_sane()) {
+        if (req == GC_CFG_SUB_DEFAULTS) {
+            config_reset_defaults();
+
+            /* Same as a restore: the mapping arrays just changed under
+             * every connected controller. */
+            bt_host_reload_ctrl_maps();
+
+            cfg_state = GC_CFG_ST_OK;
+            printf("# %s: settings reset to defaults\n", __FUNCTION__);
+        }
+        else if (gc_cfg_staged_is_sane()) {
             memcpy(&config, stage, sizeof(config));
             config_update(DEFAULT_CFG);
 

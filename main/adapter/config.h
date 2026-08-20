@@ -104,6 +104,11 @@ extern struct hw_config hw_config;
 void config_set_rst_bare_core(bool value);
 void hw_config_patch(void);
 void config_init(uint32_t src);
+/* Back to factory settings: the main config, plus the per controller and
+ * per game mappings that live in their own files. Pairings, the memory
+ * card image and the adapter's own address are left alone - this is for
+ * a configuration that has gone bad, not for clearing the unit out. */
+void config_reset_defaults(void);
 void config_update(uint32_t dst);
 uint32_t config_get_src(void);
 int32_t config_load_ctrl_map(uint32_t out_idx, const uint8_t *bdaddr);

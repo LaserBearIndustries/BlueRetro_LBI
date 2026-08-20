@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <dirent.h>
 #include "nvs.h"
 #include "zephyr/types.h"
 #include "tools/util.h"
@@ -243,7 +244,29 @@ static int32_t config_v2_update(struct config *data, char *filename) {
 
     for (uint32_t i = 0; i < WIRED_MAX_DEV; i++) {
         uint32_t j = data->in_cfg[i].map_size;
-        data->in_cfg[i].map_size += BR_COMBO_CNT;
+
+        /* map_size came out of the file, so it is not to be trusted -
+         * config_v1_update clamps it for the same reason. Without this,
+         * appending the combos to a mapping that was already near full
+         * writes past map_cfg[] and into the next port's in_cfg, and
+         * leaves a map_size larger than the array it indexes.
+         *
+         * That corruption then persists: this function stamps the current
+         * magic and stores the file, so every later boot sees a config
+         * that looks valid and nothing ever re-checks it. The only way out
+         * was a factory reset, which is what one customer needed after
+         * updating from an older build.
+         *
+         * Dropping the tail of an over-length mapping is the lesser loss:
+         * the combos are what let anyone reset or power off the adapter
+         * from the pad. */
+        if (j > ADAPTER_MAPPING_MAX - BR_COMBO_CNT) {
+            printf("%s: dev %lu map_size %lu, clamping to fit the combos\n",
+                __FUNCTION__, i, j);
+            j = ADAPTER_MAPPING_MAX - BR_COMBO_CNT;
+        }
+
+        data->in_cfg[i].map_size = j + BR_COMBO_CNT;
         for (uint32_t k = 0; k < BR_COMBO_CNT; j++, k++) {
             data->in_cfg[i].map_cfg[j].src_btn = config_default_combo[k];
             data->in_cfg[i].map_cfg[j].dst_btn = k + BR_COMBO_BASE_1;
@@ -393,6 +416,32 @@ static void config_init_nvs_patch(struct config *data) {
     }
 }
 
+/* Whatever the magic said, the mapping counts have to index the array
+ * that holds them.
+ *
+ * Checked on every load rather than only while upgrading, because a
+ * config that was corrupted once carries a current, valid magic
+ * afterwards - so no upgrade runs on it again and nothing else looks. An
+ * adapter in that state needed reflashing to recover, which is a lot to
+ * ask for a number that can be checked in a dozen instructions.
+ *
+ * Returns true when something had to be corrected. */
+static bool config_sanitise(struct config *data) {
+    bool fixed = false;
+
+    for (uint32_t i = 0; i < WIRED_MAX_DEV; i++) {
+        if (data->in_cfg[i].map_size > ADAPTER_MAPPING_MAX) {
+            printf("%s: dev %lu map_size %u > %d, clamping\n",
+                __FUNCTION__, i, data->in_cfg[i].map_size,
+                ADAPTER_MAPPING_MAX);
+            data->in_cfg[i].map_size = ADAPTER_MAPPING_MAX;
+            fixed = true;
+        }
+    }
+
+    return fixed;
+}
+
 static int32_t config_load_from_file(struct config *data, char *filename) {
 #ifdef CONFIG_BLUERETRO_QEMU
     config_init_struct(data);
@@ -414,10 +463,23 @@ static int32_t config_load_from_file(struct config *data, char *filename) {
             printf("%s: failed to open file for reading\n", __FUNCTION__);
         }
         else {
-            uint32_t count = fread((void *)data, sizeof(*data), 1, file);
+            /* Byte granularity, onto a cleared buffer, so a file shorter
+             * than the current struct leaves a deterministic tail rather
+             * than whatever was in RAM. An older layout can legitimately
+             * be shorter, and the upgrade path below is about to shuffle
+             * the whole struct and store it. */
+            size_t got;
+
+            memset((void *)data, 0, sizeof(*data));
+            got = fread((void *)data, 1, sizeof(*data), file);
             fclose(file);
-            if (count == 1) {
+
+            if (got == sizeof(*data)) {
                 ret = 0;
+            }
+            else {
+                printf("%s: short config, %u of %u bytes\n",
+                    __FUNCTION__, (unsigned)got, (unsigned)sizeof(*data));
             }
         }
     }
@@ -437,6 +499,12 @@ static int32_t config_load_from_file(struct config *data, char *filename) {
                 }
             }
         }
+    }
+
+    /* Written back when it had to change, so the repair is done once
+     * rather than on every boot for the life of the adapter. */
+    if (config_sanitise(data)) {
+        config_store_on_file(data, filename);
     }
 
     return ret;
@@ -535,6 +603,53 @@ void config_init(uint32_t src) {
         sys_mgr_cmd(SYS_MGR_CMD_WIRED_RST);
         printf("# %s: Reloaded wired core cfg: %s\n", __FUNCTION__, filename);
     }
+}
+
+/* Everything a mapping can be stored in, short of a factory wipe.
+ *
+ * config.bin holds the settings and the profile that applies to every
+ * game; the per controller and per game mappings are separate files. A
+ * reset that skipped those would leave the exact thing somebody is trying
+ * to get rid of, on whichever pad or game it was attached to.
+ *
+ * fs_reset() would do all of this and more, and the more is the problem:
+ * it takes the link keys and the memory card image with it. */
+void config_reset_defaults(void) {
+    DIR *d;
+
+    config_init_struct(&config);
+    config_init_nvs_patch(&config);
+    config_store_on_file(&config, CONFIG_FILE);
+
+    d = opendir(ROOT);
+    if (d) {
+        struct dirent *dir;
+
+        while ((dir = readdir(d)) != NULL) {
+            char path[32] = ROOT "/";
+
+            strncat(path, dir->d_name, sizeof(path) - strlen(path) - 1);
+
+            /* The recent games list starts with the same letter as the
+             * per game mappings and is not one of them. Losing it would
+             * only cost the names on the profile menu, but there is no
+             * reason to. */
+            if (strcmp(path, GID_HIST_FILE) == 0) {
+                continue;
+            }
+
+            if (strncmp(path, CTRL_MAP_FILE_PFX, strlen(CTRL_MAP_FILE_PFX)) == 0
+                    || strncmp(path, CTRL_MAP_GAME_FILE_PFX,
+                        strlen(CTRL_MAP_GAME_FILE_PFX)) == 0) {
+                if (remove(path) == 0) {
+                    printf("# %s: removed %s\n", __FUNCTION__, path);
+                }
+            }
+        }
+        closedir(d);
+    }
+
+    printf("%s: settings back to defaults\n", __FUNCTION__);
 }
 
 void config_update(uint32_t dst) {

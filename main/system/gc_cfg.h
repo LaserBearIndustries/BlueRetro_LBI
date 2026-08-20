@@ -52,6 +52,10 @@ enum {
     GC_CFG_SUB_BEGIN = 0,   /* start staging a restore */
     GC_CFG_SUB_APPLY,       /* validate what was staged, then adopt it */
     GC_CFG_SUB_ABORT,
+    /* Throw the settings away and start again from the defaults. Needs
+     * nothing staged, so it is the one way back for a config that is too
+     * broken to be read, let alone replaced. */
+    GC_CFG_SUB_DEFAULTS,
 };
 
 /* Applying writes the config file and reloads every connected controller's
