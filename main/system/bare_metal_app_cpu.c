@@ -22,231 +22,157 @@
  * SOFTWARE.
  */
 
-
+/*
+ * Runs the wired driver on core 1 outside FreeRTOS, so a cycle-counted bit-bang
+ * is never preempted. The original was written for the ESP32 and did not
+ * survive the move to the S31 in any recognisable form -- almost none of what
+ * it did exists on this part:
+ *
+ *   - it wrote the Xtensa TLB with wdtlb/witlb and set MEMCTL for the hardware
+ *     loop erratum. RISC-V has neither; region protection is PMP and ESP-IDF
+ *     sets it up itself.
+ *   - it drove core 1 through DPORT_APPCPU_CTRL_A/B/C/D. There is no DPORT
+ *     here; IDF exposes cpu_utility_ll_* and esp_cpu_unstall() instead.
+ *   - it loaded the stack pointer with "l32i a1", and reserved a window of
+ *     ESP32 ROM data at 0x3ffe3f20 so ROM printf had somewhere to scribble.
+ *
+ * The other thing that went is the reason the original was shaped so oddly. It
+ * started core 1 early, let it warm up, then clock-gated it off, and only
+ * un-gated it once a stack had been malloc'd -- because, in the author's words,
+ * the APP CPU "will wreak havoc on the heap when it starts", even given a
+ * trivial loop. That is why the call had to be threaded into cpu_start.c ahead
+ * of heap_caps_init() in the first place.
+ *
+ * Giving core 1 a static stack removes the problem rather than working around
+ * it: nothing is allocated, so there is no heap to corrupt and no ordering
+ * constraint to respect. Core 1 comes up, parks on a flag, and starts the
+ * driver when core 0 hands it one.
+ *
+ * NOT YET RUN ON HARDWARE. This compiles and follows what IDF's own
+ * call_start_cpu1() does on RISC-V, but bringing a core up outside the RTOS is
+ * exactly the kind of thing that needs a scope and a JTAG probe to believe.
+ */
 
 #include <stdio.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <esp_cpu.h>
-#include <soc/uart_reg.h>
-#include <soc/dport_reg.h>
-#include <soc/soc_memory_layout.h>
-#include <esp_heap_caps.h>
-#include <esp32/rom/ets_sys.h>
-#include <esp32/rom/uart.h>
-#include <esp32/rom/cache.h>
-#include <xt_instr_macros.h>
-#include <xtensa/config/specreg.h>
-#include <xtensa_api.h>
-#include <xtensa/config/core.h>
+#include <esp_attr.h>
+#include "hal/cpu_utility_ll.h"
+#include "rom/ets_sys.h"
+#include "bare_metal_app_cpu.h"
 
 typedef void (*wired_init_t)(void);
 
-#define BAREMETAL_APP_CPU_DEBUG 1
-
-// Reserve static data for built-in ROM functions
-#define APP_CPU_RESERVE_ROM_DATA 1
-
+/* RISC-V frames are larger than the Xtensa ones this used to size for. */
 #ifndef APP_CPU_STACK_SIZE
-#define APP_CPU_STACK_SIZE 1024
+#define APP_CPU_STACK_SIZE 2048
 #endif
 
-#ifndef CONFIG_FREERTOS_UNICORE
-//#error Bare metal app core use requires UNICORE build
-#endif
-
-// Interrupt vector, this comes from the SDK
+/* Interrupt vectors, from the SDK. _mtvt_table is the CLIC vectored table. */
 extern int _vector_table;
+extern int _mtvt_table;
 
-static wired_init_t app_cpu_user;
-static volatile uint32_t app_cpu_stack_ptr;
-static volatile uint8_t app_cpu_initial_start;
+/* Not static: the entry stub below loads sp from it before any C runs, and
+ * needs a symbol the assembler can name. The RISC-V ABI wants sp 16-byte
+ * aligned. */
+uint8_t app_cpu_stack[APP_CPU_STACK_SIZE] __attribute__((aligned(16)));
 
-#ifdef APP_CPU_RESERVE_ROM_DATA
-SOC_RESERVE_MEMORY_REGION(0x3ffe3f20, 0x3ffe4350, rom_app_data);
-#endif
+static volatile wired_init_t app_cpu_user = NULL;
+static volatile uint8_t app_cpu_initial_start = 0;
 
-
-
-#ifdef APP_CPU_RESERVE_ROM_DATA
-// Can't load from flash, therefore the string needs to be placed in the RAM
-//static char hello_world[] = "Hello World!\n";
-#endif
-
-// APP CPU cache is part of the main memory pool and we can't get the caches to work easily anyway because cache loads need to be synchronized.
-// So for now the app core can only execute from IRAM (and internal ROM).
-// Also, the APP CPU CANNOT load data from the flash!
-static void IRAM_ATTR app_cpu_main()
-{
-    app_cpu_user();
-    // User code goes here
-    //xt_int_enable_mask(1 << 19);
-
-    while (1) {
-#ifdef APP_CPU_RESERVE_ROM_DATA
-        //ets_printf(hello_world); // Do not specify a "Hello World" here, as this would be stored in the flash!
-#endif
-        //ets_delay_us(1000000);
-    }
-}
-
-// The main MUST NOT be inlined!
-// Otherwise, it will cause mayhem on the stack since we are modifying the stack pointer before the main is called.
-// Having a volatile pointer around should force the compiler to behave.
-static void (* volatile app_cpu_main_ptr)() = &app_cpu_main;
-
-static inline void cpu_write_dtlb(uint32_t vpn, unsigned attr)
-{
-    asm volatile ("wdtlb  %1, %0; dsync\n" :: "r" (vpn), "r" (attr));
-}
-
-static inline void cpu_write_itlb(unsigned vpn, unsigned attr)
-{
-    asm volatile ("witlb  %1, %0; isync\n" :: "r" (vpn), "r" (attr));
-}
-
-static inline void cpu_init_hwloop(void)
-{
-#if XCHAL_ERRATUM_572
-    uint32_t memctl = XCHAL_CACHE_MEMCTL_DEFAULT;
-    WSR(MEMCTL, memctl);
-#endif // XCHAL_ERRATUM_572
-}
-
-static inline void cpu_configure_region_protection()
-{
-    const uint32_t pages_to_protect[] = {0x00000000, 0x80000000, 0xa0000000, 0xc0000000, 0xe0000000};
-    for (int i = 0; i < sizeof(pages_to_protect)/sizeof(pages_to_protect[0]); ++i) {
-        cpu_write_dtlb(pages_to_protect[i], 0xf);
-        cpu_write_itlb(pages_to_protect[i], 0xf);
-    }
-    cpu_write_dtlb(0x20000000, 0);
-    cpu_write_itlb(0x20000000, 0);
-}
+/* IRAM_ATTR goes on the definition only -- it expands to a counter-numbered
+ * section, so repeating it here would name a different one. */
+void app_cpu_main(void);
 
 /*
- * This is the entry point for the APP CPU.
- * When the CPU is enabled the first time, we just "warm up" things, so we do some initialization before turning the clock off again.
- * Then the start function will load the real stack pointer and switch the CPU on again.
+ * Where core 1 lands out of reset. Naked because there is no stack yet, so the
+ * compiler must not emit a prologue.
+ *
+ * gp has to be set before anything else: the linker relaxes global accesses to
+ * be gp-relative, so any C touching a global before this point reads rubbish.
  */
-static void IRAM_ATTR app_cpu_init()
+static void IRAM_ATTR __attribute__((naked, used)) app_cpu_entry(void)
 {
-    // init interrupt handler
+    __asm__ __volatile__(
+        ".option push\n"
+        ".option norelax\n"
+        "   la    gp, __global_pointer$\n"
+        ".option pop\n"
+        "   la    sp, app_cpu_stack\n"
+        "   li    t0, %0\n"
+        "   add   sp, sp, t0\n"
+        "   andi  sp, sp, -16\n"
+        "   j     app_cpu_main\n"
+        :: "i" (APP_CPU_STACK_SIZE)
+    );
+}
+
+void IRAM_ATTR app_cpu_main(void)
+{
     esp_cpu_intr_set_ivt_addr(&_vector_table);
-
-    /* New cpu_configure_region_protection within bootloader_init_mem fail */
-    /* Use version from v4.0.2 here and call cpu_init_memctl replacement */
-    cpu_configure_region_protection();
-    cpu_init_hwloop();
-
-#ifdef APP_CPU_RESERVE_ROM_DATA
-    uartAttach();
-    ets_install_uart_printf();
-    uart_tx_switch(CONFIG_ESP_CONSOLE_UART_NUM);
+#if SOC_INT_CLIC_SUPPORTED
+    /* With CLIC hardware vectoring the core jumps to mtvt + 4 * interrupt_id. */
+    esp_cpu_intr_set_mtvt_addr(&_mtvt_table);
+#endif
+#if SOC_CPU_SUPPORT_WFE
+    esp_cpu_disable_wfe_mode();
+#endif
+#if SOC_BRANCH_PREDICTOR_SUPPORTED
+    /* Left off deliberately. This core exists to hit sub-microsecond edges on
+     * a 2 Mbps bus by counting instructions, and a predictor makes the cost of
+     * a loop depend on history rather than on the code. Throughput is worth
+     * nothing here; a repeatable cycle count is worth everything. The ESP32
+     * had no predictor, so the timing this driver inherited assumes there is
+     * none. Revisit only with a scope on the pins. */
+    esp_cpu_branch_prediction_disable();
 #endif
 
     app_cpu_initial_start = 1;
 
-    // This will halt the CPU until it is needed
-    DPORT_REG_CLR_BIT(DPORT_APPCPU_CTRL_B_REG, DPORT_APPCPU_CLKGATE_EN);
+    /* Park until core 0 has a driver for us. No RTOS on this core, so this is
+     * a plain spin -- it is a dedicated core and has nothing else to do. */
+    while (app_cpu_user == NULL) {
+    }
 
-    // clock cpu will still execute 1 instruction after the clock gate is turned off.
-    // so just have some NOPs here, so the stack pointer will be correct
-    asm volatile (                      \
-        "nop\n"                         \
-        "nop\n"                         \
-        "nop\n"                         \
-        "nop\n"                         \
-        "nop\n"                         \
-    );
+    app_cpu_user();
 
-    // load the new stack pointer for our main
-    // this is VERY important, since the initial stack pointer now points somewhere in the heap!
-    asm volatile (                      \
-        "l32i a1, %0, 0\n"              \
-        ::"r"(&app_cpu_stack_ptr));
-
-    // Finally call the main.
-    // Its imperative for the main to be NOT INLINED!
-    app_cpu_main();
-    while (1);
+    while (1) {
+    }
 }
-
 
 int32_t start_app_cpu(wired_init_t user)
 {
-#if BAREMETAL_APP_CPU_DEBUG
-    printf("# App main at %08lX\n", (uint32_t)&app_cpu_main);
-    printf("# App init at %08lX\n", (uint32_t)&app_cpu_init);
-    printf("# APP_CPU RESET: %lu\n", DPORT_READ_PERI_REG(DPORT_APPCPU_CTRL_A_REG));
-    printf("# APP_CPU CLKGATE: %lu\n", DPORT_READ_PERI_REG(DPORT_APPCPU_CTRL_B_REG));
-    printf("# APP_CPU STALL: %lu\n", DPORT_READ_PERI_REG(DPORT_APPCPU_CTRL_C_REG));
-    printf("# APP_CACHE_CTRL: %08lx\n", DPORT_READ_PERI_REG(DPORT_APP_CACHE_CTRL_REG));
-#endif
+    if (!app_cpu_initial_start) {
+        printf("# %s: APP CPU was not initialized!\n", __FUNCTION__);
+        return -1;
+    }
+
+    if (app_cpu_user) {
+        printf("# %s: APP CPU is already running!\n", __FUNCTION__);
+        return -1;
+    }
+
     app_cpu_user = user;
-
-    if (!app_cpu_initial_start)
-    {
-        printf("APP CPU was not initialized!\n");
-        return -1;
-    }
-
-    if (DPORT_REG_GET_BIT(DPORT_APPCPU_CTRL_B_REG, DPORT_APPCPU_CLKGATE_EN))
-    {
-        printf("APP CPU is already running!\n");
-        return -1;
-    }
-
-    if (!app_cpu_stack_ptr)
-    {
-        // We need to allocate the stack for the APP CPU here, since the original stack from the time when the APP CPU was initialized is now some part of the heap.
-        app_cpu_stack_ptr = (uint32_t)heap_caps_malloc(APP_CPU_STACK_SIZE, MALLOC_CAP_DMA);
-
-        // Don't forget to set the stack ptr to the end of the segment
-        app_cpu_stack_ptr += APP_CPU_STACK_SIZE - sizeof(size_t);
-    }
-
-#if BAREMETAL_APP_CPU_DEBUG
-    printf("# APP CPU STACK PTR: %08lX\n", (uint32_t)app_cpu_stack_ptr);
-#endif
-
-    DPORT_SET_PERI_REG_MASK(DPORT_APPCPU_CTRL_B_REG, DPORT_APPCPU_CLKGATE_EN);
     return 0;
 }
 
-
 /*
- * Initializes the app cpu. Somehow the APP cpu will wreak havoc on the heap when it starts.
- * Even if I give it a trivial infinite loop, it will still cause memory corruption.
- * Not sure what exactly is going on there, might be some kind of initialization sequence of the hardware maybe?
- * Anyway, the only possible workaround is to do it like the SDK and start the CPU before the heap is initialized.
- * Therefore we need to insert a call to this in cpu_start.c from the SDK before it calls heap_caps_init().
- * We will then do some initialization on the APP CPU before turning off the clock again until the APP core is needed.
+ * Called from start_cpu0_default() in our copy of startup.c. It no longer has
+ * to run before heap_caps_init() -- the stack is static -- but it is left there
+ * so the wired side is up as early as possible.
  */
-void init_app_cpu_baremetal()
+void init_app_cpu_baremetal(void)
 {
-    // just in case...
-    // disable the clock gate of the app core
-    DPORT_REG_CLR_BIT(DPORT_APPCPU_CTRL_B_REG, DPORT_APPCPU_CLKGATE_EN);
-
     app_cpu_initial_start = 0;
+    app_cpu_user = NULL;
 
-    // disable all interrupts
-    // should be disabled by default anyway, but in case we have a bootloader, we don't know what it has already done
-    for (int i = ETS_WIFI_MAC_INTR_SOURCE; i <= ETS_CACHE_IA_INTR_SOURCE; i++)
-    {
-        intr_matrix_set(1, i, ETS_INVALID_INUM);
+    ets_set_appcpu_boot_addr((uint32_t)&app_cpu_entry);
+
+    esp_cpu_unstall(1);
+    cpu_utility_ll_enable_clock_and_reset_app_cpu();
+    cpu_utility_ll_enable_clock_and_reset_app_cpu_int_matrix();
+
+    while (!app_cpu_initial_start) {
     }
-
-    // Reset the CPU
-    DPORT_REG_SET_BIT(DPORT_APPCPU_CTRL_A_REG, DPORT_APPCPU_RESETTING);
-    DPORT_REG_CLR_BIT(DPORT_APPCPU_CTRL_A_REG, DPORT_APPCPU_RESETTING);
-
-    // Load the entry vector
-    DPORT_WRITE_PERI_REG(DPORT_APPCPU_CTRL_D_REG, ((uint32_t)&app_cpu_init));
-
-    // And turn the clock on
-    DPORT_SET_PERI_REG_MASK(DPORT_APPCPU_CTRL_B_REG, DPORT_APPCPU_CLKGATE_EN);
-
-    // finally wait for the CPU to start
-    while(!app_cpu_initial_start){}
 }
-

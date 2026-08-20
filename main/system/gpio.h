@@ -19,6 +19,7 @@
 #include "soc/interrupts.h"
 #include "esp_rom_gpio.h"
 #include "soc/gpio_struct.h"
+#include "hal/gpio_ll.h"
 #include "hal/gpio_types.h"
 #include "driver/gpio.h"
 

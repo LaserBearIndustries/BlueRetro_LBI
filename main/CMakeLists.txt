@@ -14,14 +14,12 @@ set(cov_srcs
     "adapter/wired/pce.c"
     "adapter/wired/genesis.c"
     "adapter/wired/real.c"
-    "adapter/wired/jag.c"
     "adapter/wired/pcfx.c"
     "adapter/wired/jvs.c"
     "adapter/wired/n64.c"
     "adapter/wired/dc.c"
     "adapter/wired/gc.c"
     "adapter/wired/ps.c"
-    "adapter/wired/sea.c"
     "adapter/wired/wii.c"
     "adapter/wired/parallel_1p.c"
     "adapter/wired/parallel_2p.c"
@@ -81,11 +79,20 @@ foreach(drv maple nsi npiso_io snes_spi pce_io sega_io cdi_uart real_spi
     endif()
 endforeach()
 
+# adapter/wired/jag.c and sea.c call straight into their drivers, so unlike the
+# rest of the portable mapping layer they cannot be built without them.
+if(CONFIG_BLUERETRO_DRV_JAG_IO)
+    list(APPEND cov_srcs "adapter/wired/jag.c")
+endif()
+
 # The SEA Board is the only user of the FPGA bitstream loader.
 if(CONFIG_BLUERETRO_DRV_SEA_IO)
     list(APPEND srcs
         "wired/sea_io.c"
         "system/fpga_config.c"
+    )
+    list(APPEND cov_srcs
+        "adapter/wired/sea.c"
     )
 endif()
 

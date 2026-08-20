@@ -12,7 +12,13 @@
 #include "genesis.h"
 #include "pce.h"
 #include "real.h"
+#ifdef CONFIG_BLUERETRO_DRV_JAG_IO
 #include "jag.h"
+#else
+#define jag_from_generic NULL
+#define jag_meta_init NULL
+#define jag_init_buffer NULL
+#endif
 #include "pcfx.h"
 #include "ps.h"
 #include "saturn.h"
@@ -22,7 +28,17 @@
 #include "gc.h"
 #include "parallel_1p.h"
 #include "parallel_2p.h"
+/* jag.c and sea.c are the only two of the mapping files that call into their
+ * driver, so unlike the rest of this layer they are not built when the system
+ * choice leaves the driver out. Their table slots go NULL, as in wired_bare.c.
+ */
+#ifdef CONFIG_BLUERETRO_DRV_SEA_IO
 #include "sea.h"
+#else
+#define sea_from_generic NULL
+#define sea_meta_init NULL
+#define sea_init_buffer NULL
+#endif
 #include "wii.h"
 #include "wired.h"
 
@@ -185,6 +201,7 @@ void wired_para_turbo_mask_hdlr(void) {
         GPIO.out.val = (map1->buttons | map1_mask->buttons) & (map2->buttons | map2_mask->buttons);
         GPIO.out1.val = (map1->buttons_high | map1_mask->buttons_high) & (map2->buttons_high | map2_mask->buttons_high);
     }
+#ifdef CONFIG_BLUERETRO_DRV_SEA_IO
     else if (wired_adapter.system_id == SEA_BOARD) {
         struct sea_map *map = (struct sea_map *)wired_adapter.data[0].output;
         struct sea_map *turbo_map_mask = (struct sea_map *)wired_adapter.data[0].output_mask;
@@ -197,6 +214,7 @@ void wired_para_turbo_mask_hdlr(void) {
             GPIO.out1.val = map->buttons_high | turbo_map_mask->buttons_high;
         }
     }
+#endif
 }
 
 void IRAM_ATTR wired_gen_turbo_mask_btns16_pos(struct wired_data *wired_data, uint16_t *buttons, const uint32_t btns_mask[32]) {
