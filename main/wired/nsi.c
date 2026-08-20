@@ -1234,7 +1234,7 @@ void nsi_port_cfg(uint16_t mask) {
     for (uint32_t i = 0; i < ARRAY_SIZE(gpio_pin); i++) {
 
         if (mask & 0x1) {
-            PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[gpio_pin[i]], PIN_FUNC_GPIO);
+            gpio_ll_func_sel(&GPIO, gpio_pin[i], PIN_FUNC_GPIO);
             /* Bidirectional open-drain */
             gpio_set_direction_iram(gpio_pin[i], GPIO_MODE_INPUT_OUTPUT_OD);
             esp_rom_gpio_connect_out_signal(gpio_pin[i], RMT_SIG_OUT0_IDX + rmt_ch[i][system], 0, 0);

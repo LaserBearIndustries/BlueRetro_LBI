@@ -308,7 +308,7 @@ void snes_spi_init(uint32_t package) {
         gpio_set_level_iram(p->cipo_pin, 1);
         gpio_set_direction_iram(p->cipo_pin, GPIO_MODE_OUTPUT);
         esp_rom_gpio_connect_out_signal(p->cipo_pin, p->cipo_sig, false, false);
-        PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->cipo_pin], PIN_FUNC_GPIO);
+        gpio_ll_func_sel(&GPIO, p->cipo_pin, PIN_FUNC_GPIO);
 
         /* COPI */
         io_conf.mode = GPIO_MODE_INPUT;

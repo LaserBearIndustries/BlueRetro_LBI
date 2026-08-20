@@ -64,7 +64,6 @@ set(srcs
     "system/led.c"
     "system/bare_metal_app_cpu.c"
     "system/core0_stall.c"
-    "system/core0_stall_highint_hdl.S"
     "system/startup.c"
     "tools/stats.c"
     "wired/wired_bare.c"
@@ -165,7 +164,5 @@ idf_build_set_property(COMPILE_DEFINITIONS "-DBLUERETRO" APPEND)
 # HP cores. Use the GCC __atomic_* builtin path in zephyr/atomic.h rather than
 # the Xtensa asm implementation that used to live in zephyr/atomic.S.
 idf_build_set_property(COMPILE_DEFINITIONS "-DCONFIG_ATOMIC_OPERATIONS_BUILTIN" APPEND)
-idf_build_set_property(COMPILE_DEFINITIONS "-DXT_INTEXC_HOOKS" APPEND)
 
 target_link_libraries(${COMPONENT_TARGET} "-u ld_include_my_startup_file")
-target_link_libraries(${COMPONENT_TARGET} "-u ld_include_core0_stall_highint_hdl")

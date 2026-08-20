@@ -112,7 +112,7 @@ void sea_init(void) {
 
     rmt_ll_enable_interrupt(&RMT, RMT_LL_EVENT_TX_DONE(0), 1);
 
-    PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[GBAHD_COM_PIN], PIN_FUNC_GPIO);
+    gpio_ll_func_sel(&GPIO, GBAHD_COM_PIN, PIN_FUNC_GPIO);
     gpio_set_direction_iram(GBAHD_COM_PIN, GPIO_MODE_OUTPUT);
     esp_rom_gpio_connect_out_signal(GBAHD_COM_PIN, RMT_SIG_OUT0_IDX, 0, 0);
     esp_rom_gpio_connect_in_signal(GBAHD_COM_PIN, RMT_SIG_IN0_IDX, 0);

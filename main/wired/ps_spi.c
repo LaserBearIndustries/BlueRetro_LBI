@@ -1007,30 +1007,30 @@ inner_break:
     /* RXD */
     gpio_set_level_iram(P1_RXD_PIN, 1);
     gpio_set_direction_iram(P1_RXD_PIN, GPIO_MODE_INPUT);
-    PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P1_RXD_PIN], PIN_FUNC_GPIO);
+    gpio_ll_func_sel(&GPIO, P1_RXD_PIN, PIN_FUNC_GPIO);
     gpio_set_level_iram(P2_RXD_PIN, 1);
     gpio_set_direction_iram(P2_RXD_PIN, GPIO_MODE_INPUT);
-    PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P2_RXD_PIN], PIN_FUNC_GPIO);
+    gpio_ll_func_sel(&GPIO, P2_RXD_PIN, PIN_FUNC_GPIO);
 
     /* TXD */
     gpio_set_pull_mode_iram(P1_TXD_PIN, GPIO_PULLUP_ONLY);
     gpio_set_direction_iram(P1_TXD_PIN, GPIO_MODE_INPUT);
     esp_rom_gpio_connect_in_signal(P1_TXD_PIN, HSPID_IN_IDX, false);
-    PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P1_TXD_PIN], PIN_FUNC_GPIO);
+    gpio_ll_func_sel(&GPIO, P1_TXD_PIN, PIN_FUNC_GPIO);
     gpio_set_pull_mode_iram(P2_TXD_PIN, GPIO_PULLUP_ONLY);
     gpio_set_direction_iram(P2_TXD_PIN, GPIO_MODE_INPUT);
     esp_rom_gpio_connect_in_signal(P2_TXD_PIN, VSPID_IN_IDX, false);
-    PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P2_TXD_PIN], PIN_FUNC_GPIO);
+    gpio_ll_func_sel(&GPIO, P2_TXD_PIN, PIN_FUNC_GPIO);
 
     /* SCK */
     gpio_set_pull_mode_iram(P1_SCK_PIN, GPIO_PULLUP_ONLY);
     gpio_set_direction_iram(P1_SCK_PIN, GPIO_MODE_INPUT);
     esp_rom_gpio_connect_in_signal(P1_SCK_PIN, HSPICLK_IN_IDX, false);
-    PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P1_SCK_PIN], PIN_FUNC_GPIO);
+    gpio_ll_func_sel(&GPIO, P1_SCK_PIN, PIN_FUNC_GPIO);
     gpio_set_pull_mode_iram(P2_SCK_PIN, GPIO_PULLUP_ONLY);
     gpio_set_direction_iram(P2_SCK_PIN, GPIO_MODE_INPUT);
     esp_rom_gpio_connect_in_signal(P2_SCK_PIN, VSPICLK_IN_IDX, false);
-    PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P2_SCK_PIN], PIN_FUNC_GPIO);
+    gpio_ll_func_sel(&GPIO, P2_SCK_PIN, PIN_FUNC_GPIO);
 
     periph_ll_enable_clk_clear_rst(PERIPH_HSPI_MODULE);
     periph_ll_enable_clk_clear_rst(PERIPH_VSPI_MODULE);

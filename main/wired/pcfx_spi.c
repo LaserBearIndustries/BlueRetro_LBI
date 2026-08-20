@@ -209,7 +209,7 @@ void pcfx_spi_init(uint32_t package) {
         gpio_set_level_iram(p->data_pin, 1);
         gpio_set_direction_iram(p->data_pin, GPIO_MODE_OUTPUT);
         esp_rom_gpio_connect_out_signal(p->data_pin, p->data_sig, true, false); // PCFX data is inverted
-        PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->data_pin], PIN_FUNC_GPIO);
+        gpio_ll_func_sel(&GPIO, p->data_pin, PIN_FUNC_GPIO);
 
         /* Clock */
         io_conf.mode = GPIO_MODE_INPUT;

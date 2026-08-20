@@ -3,7 +3,6 @@ archive: libmain.a
 entries:
     main (noflash)
     core0_stall (noflash)
-    core0_stall_highint_hdl (noflash)
     gpio (noflash)
     intr (noflash)
     led (noflash)

@@ -308,13 +308,13 @@ void jvs_init(uint32_t package) {
     GPIO.out_w1tc.val = JVS_RTS_MASK;
 
     /* JVS_TX is output */
-    PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[JVS_TX_PIN], PIN_FUNC_GPIO);
+    gpio_ll_func_sel(&GPIO, JVS_TX_PIN, PIN_FUNC_GPIO);
     gpio_set_direction_iram(JVS_TX_PIN, GPIO_MODE_INPUT_OUTPUT);
     gpio_set_level_iram(JVS_TX_PIN, 1);
     esp_rom_gpio_connect_out_signal(JVS_TX_PIN, U1TXD_OUT_IDX, false, false);
 
     /* JVS_RX is input */
-    PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[JVS_RX_PIN], PIN_FUNC_GPIO);
+    gpio_ll_func_sel(&GPIO, JVS_RX_PIN, PIN_FUNC_GPIO);
     gpio_set_pull_mode_iram(JVS_RX_PIN, GPIO_PULLUP_ONLY);
     gpio_set_direction_iram(JVS_RX_PIN, GPIO_MODE_INPUT);
     esp_rom_gpio_connect_in_signal(JVS_RX_PIN, U1RXD_IN_IDX, false);

@@ -38,14 +38,16 @@
  * up in intr_0 -- so they are defined together here. Changing the line means
  * changing all three, and nothing outside this header should name either half.
  *
- * INT_0 is provisional. Which line the wired driver should own depends on the
- * interrupt routing that comes with core 1 bring-up, which is not ported yet.
+ * INT_0 is not just a guess. ESP-IDF's own gpio_ll_intr_enable_on_core() on
+ * this target ignores the core argument entirely and enables GPIO_LL_INTR0_ENA
+ * unconditionally, so the per-pin enable that gpio_config_iram() performs and
+ * the status register read here are talking about the same line. If a later
+ * revision gives the cores separate lines again, all three move together.
  */
 #define BR_GPIO_INTR_SOURCE ETS_GPIO_INTR0_SOURCE
 #define gpio_intr_status()  (GPIO.intr_0.val)
 #define gpio_intr_status1() (GPIO.intr_01.val)
 
-extern const uint32_t GPIO_PIN_MUX_REG_IRAM[];
 
 int32_t gpio_set_level_iram(gpio_num_t gpio_num, uint32_t level);
 int32_t gpio_set_pull_mode_iram(gpio_num_t gpio_num, gpio_pull_mode_t pull);

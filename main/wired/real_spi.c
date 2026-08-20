@@ -213,7 +213,7 @@ void real_spi_init(uint32_t package) {
     gpio_set_level_iram(P1_RXD_PIN, 1);
     gpio_set_direction_iram(P1_RXD_PIN, GPIO_MODE_OUTPUT);
     esp_rom_gpio_connect_out_signal(P1_RXD_PIN, HSPIQ_OUT_IDX, false, false);
-    PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P1_RXD_PIN], PIN_FUNC_GPIO);
+    gpio_ll_func_sel(&GPIO, P1_RXD_PIN, PIN_FUNC_GPIO);
 
     /* SCK */
     io_conf.mode = GPIO_MODE_INPUT;

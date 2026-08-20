@@ -15,6 +15,7 @@
 #include <esp_log.h>
 #include "driver/gpio.h"
 #include "hal/ledc_hal.h"
+#include "hal/ledc_periph.h"
 #include "hal/gpio_hal.h"
 #include "driver/ledc.h"
 #include "esp_rom_gpio.h"
@@ -29,6 +30,19 @@
 #include "system/led.h"
 #include "bare_metal_app_cpu.h"
 #include "manager.h"
+
+/* The ESP32 had one LEDC unit and gave a base output-signal index per speed
+ * mode, so a channel's signal was that base plus the channel number. The S31
+ * has two units and indexes the signal directly:
+ *
+ *   ledc_periph_signal[unit].speed_mode[mode].sig_out_idx[channel]
+ *
+ * BlueRetro only ever drives unit 0, and the S31 populates only the low-speed
+ * mode -- there is no high-speed mode on this part, which is also why the
+ * error LED's channel 0 moved to low speed here and in led.c together.
+ */
+#define BR_LEDC_SIG_OUT(ch) \
+    (ledc_periph_signal[0].speed_mode[LEDC_LOW_SPEED_MODE].sig_out_idx[ch])
 
 #define BOOT_BTN_PIN 0
 
@@ -170,10 +184,10 @@ static inline void set_sense_out(uint32_t pin, uint32_t state) {
 
 static inline void set_port_led(uint32_t index, uint32_t state) {
     if (state) {
-        esp_rom_gpio_connect_out_signal(led_list[index], ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_1, 0, 0);
+        esp_rom_gpio_connect_out_signal(led_list[index], BR_LEDC_SIG_OUT(LEDC_CHANNEL_1), 0, 0);
     }
     else {
-        esp_rom_gpio_connect_out_signal(led_list[index], ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_2, 0, 0);
+        esp_rom_gpio_connect_out_signal(led_list[index], BR_LEDC_SIG_OUT(LEDC_CHANNEL_2), 0, 0);
     }
 }
 
@@ -206,9 +220,9 @@ static void internal_flag_init(void) {
 
 static void port_led_pulse(uint32_t pin) {
     if (pin) {
-        PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[pin], PIN_FUNC_GPIO);
+        esp_rom_gpio_pad_select_gpio(pin);
         gpio_set_direction(pin, GPIO_MODE_OUTPUT);
-        esp_rom_gpio_connect_out_signal(pin, ledc_periph_signal[LEDC_HIGH_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_0, 0, 0);
+        esp_rom_gpio_connect_out_signal(pin, BR_LEDC_SIG_OUT(LEDC_CHANNEL_0), 0, 0);
     }
 }
 
@@ -219,25 +233,25 @@ static void set_leds_as_btn_status(uint8_t state) {
     for (uint32_t i = 0; i < hw_config.port_cnt; i++) {
         uint8_t pin = led_list[i];
 
-        PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[pin], PIN_FUNC_GPIO);
+        esp_rom_gpio_pad_select_gpio(pin);
         gpio_set_direction(pin, GPIO_MODE_OUTPUT);
         if (state) {
-            esp_rom_gpio_connect_out_signal(pin, ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_1, 0, 0);
+            esp_rom_gpio_connect_out_signal(pin, BR_LEDC_SIG_OUT(LEDC_CHANNEL_1), 0, 0);
         }
         else {
             /* Hand the port LEDs back to the off channel. Without this they stay
              * driven by the flash channel until wired_port_hdl() next runs, which
              * looks like LEDs lighting up on their own for a fraction of a second. */
-            esp_rom_gpio_connect_out_signal(pin, ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_2, 0, 0);
+            esp_rom_gpio_connect_out_signal(pin, BR_LEDC_SIG_OUT(LEDC_CHANNEL_2), 0, 0);
         }
     }
 
     /* Use error LED as well */
     if (state) {
-        esp_rom_gpio_connect_out_signal(err_led_pin, ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_1, 0, 0);
+        esp_rom_gpio_connect_out_signal(err_led_pin, BR_LEDC_SIG_OUT(LEDC_CHANNEL_1), 0, 0);
     }
     else {
-        esp_rom_gpio_connect_out_signal(err_led_pin, ledc_periph_signal[LEDC_HIGH_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_0, 0, 0);
+        esp_rom_gpio_connect_out_signal(err_led_pin, BR_LEDC_SIG_OUT(LEDC_CHANNEL_0), 0, 0);
     }
 }
 
@@ -924,7 +938,7 @@ void sys_mgr_init(uint32_t package) {
         if (i < hw_config.port_cnt) {
             /* Can't use GPIO mode on port LED as some wired driver overwrite whole GPIO port */
             /* Use unused LEDC channel 2 to force output low */
-            esp_rom_gpio_connect_out_signal(led_list[i], ledc_periph_signal[LEDC_LOW_SPEED_MODE].sig_out0_idx + LEDC_CHANNEL_2, 0, 0);
+            esp_rom_gpio_connect_out_signal(led_list[i], BR_LEDC_SIG_OUT(LEDC_CHANNEL_2), 0, 0);
         }
     }
 

@@ -306,7 +306,7 @@ void wii_i2c_init(uint32_t package) {
 
         /* Data */
         gpio_set_level_iram(p->sda_pin, 1);
-        PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->sda_pin], PIN_FUNC_GPIO);
+        gpio_ll_func_sel(&GPIO, p->sda_pin, PIN_FUNC_GPIO);
         gpio_set_direction_iram(p->sda_pin, GPIO_MODE_INPUT_OUTPUT_OD);
         gpio_set_pull_mode_iram(p->sda_pin, GPIO_PULLUP_ONLY);
         esp_rom_gpio_connect_out_signal(p->sda_pin, p->sda_out_sig, false, false);
@@ -314,7 +314,7 @@ void wii_i2c_init(uint32_t package) {
 
         /* Clock */
         gpio_set_level_iram(p->scl_pin, 1);
-        PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[p->scl_pin], PIN_FUNC_GPIO);
+        gpio_ll_func_sel(&GPIO, p->scl_pin, PIN_FUNC_GPIO);
         gpio_set_direction_iram(p->scl_pin, GPIO_MODE_INPUT_OUTPUT_OD);
         esp_rom_gpio_connect_out_signal(p->scl_pin, p->scl_out_sig, false, false);
         esp_rom_gpio_connect_in_signal(p->scl_pin, p->scl_in_sig, false);
