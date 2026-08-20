@@ -281,14 +281,15 @@ static void i2c_isr(void* arg) {
     port->hw->int_clr.val = intr_sts;
 }
 
-static unsigned isr_dispatch(unsigned cause) {
+static void isr_dispatch(void *arg) {
+    const uint32_t cause = (uint32_t)arg;
     if (cause & I2C0_INTR_MASK) {
         i2c_isr((void *)&wii_ctrl_ports[0]);
     }
     if (cause & I2C1_INTR_MASK) {
         i2c_isr((void *)&wii_ctrl_ports[1]);
     }
-    return 0;
+    return;
 }
 #endif /* defined(CONFIG_BLUERETRO_SYSTEM_WII_EXT) || defined(CONFIG_BLUERETRO_SYSTEM_UNIVERSAL) */
 
@@ -342,8 +343,8 @@ void wii_i2c_init(uint32_t package) {
         p->hw->int_ena.val |= I2C_TRANS_COMPLETE_INT_ENA;
     }
 
-    intexc_alloc_iram(ETS_I2C_EXT0_INTR_SOURCE, I2C0_INTR_NUM, isr_dispatch);
-    intexc_alloc_iram(ETS_I2C_EXT1_INTR_SOURCE, I2C1_INTR_NUM, isr_dispatch);
+    intexc_alloc_iram(ETS_I2C0_INTR_SOURCE, I2C0_INTR_NUM, isr_dispatch, (void *)I2C0_INTR_MASK);
+    intexc_alloc_iram(ETS_I2C1_INTR_SOURCE, I2C1_INTR_NUM, isr_dispatch, (void *)I2C1_INTR_MASK);
 
     wii_i2c_port_cfg(0x3);
 #endif /* defined(CONFIG_BLUERETRO_SYSTEM_WII_EXT) || defined(CONFIG_BLUERETRO_SYSTEM_UNIVERSAL) */

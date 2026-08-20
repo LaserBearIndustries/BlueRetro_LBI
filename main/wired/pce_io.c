@@ -197,7 +197,7 @@ static void pce_mt_task(void) {
     }
 }
 
-static unsigned pce_mt_oe_isr(unsigned cause) {
+static void pce_mt_oe_isr(void *arg) {
     uint32_t cur_in1 = GPIO.in1.val;
     cycle = 0;
     if (cur_in1 & P1_SEL_MASK) {
@@ -207,10 +207,10 @@ static unsigned pce_mt_oe_isr(unsigned cause) {
         GPIO.out.val = map[cycle][1] | map_mask[cycle][1];
     }
     GPIO.status_w1tc.val = P1_OE_MASK;
-    return 0;
+    return;
 }
 
-static unsigned pce_6btns_oe_isr(unsigned cause) {
+static void pce_6btns_oe_isr(void *arg) {
     uint32_t cur_in1 = GPIO.in1.val;
     cycle = 0;
     ++frame_cnt;
@@ -231,7 +231,7 @@ static unsigned pce_6btns_oe_isr(unsigned cause) {
         }
     }
     GPIO.status_w1tc.val = P1_OE_MASK;
-    return 0;
+    return;
 }
 
 static void pce_mouse_task(void) {
@@ -279,7 +279,7 @@ static void pce_mouse_task(void) {
     }
 }
 
-static unsigned pce_mouse_oe_isr(unsigned cause) {
+static void pce_mouse_oe_isr(void *arg) {
     uint32_t cur_in1 = GPIO.in1.val;
     cycle = 0;
     ++frame_cnt;
@@ -293,7 +293,7 @@ static unsigned pce_mouse_oe_isr(unsigned cause) {
         GPIO.out.val = map[0][2];
     }
     GPIO.status_w1tc.val = P1_OE_MASK;
-    return 0;
+    return;
 }
 
 static void pce_kb_task(void) {
@@ -335,7 +335,7 @@ static void pce_kb_task(void) {
     }
 }
 
-static unsigned pce_kb_oe_isr(unsigned cause) {
+static void pce_kb_oe_isr(void *arg) {
     uint32_t cur_in1 = GPIO.in1.val;
     cycle = 0;
     if (cur_in1 & P1_SEL_MASK) {
@@ -345,7 +345,7 @@ static unsigned pce_kb_oe_isr(unsigned cause) {
         GPIO.out.val = scancodes[cycle][0];
     }
     GPIO.status_w1tc.val = P1_OE_MASK;
-    return 0;
+    return;
 }
 
 void pce_io_init(uint32_t package) {
@@ -404,25 +404,25 @@ void pce_io_init(uint32_t package) {
         map_mask[3] = (uint32_t *)wired_adapter.data[3].output_mask;
         map_mask[4] = (uint32_t *)wired_adapter.data[4].output_mask;
         if (config.out_cfg[0].dev_mode == DEV_PAD_ALT) {
-            intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, GPIO_INTR_NUM, pce_6btns_oe_isr);
+            intexc_alloc_iram(BR_GPIO_INTR_SOURCE, GPIO_INTR_NUM, pce_6btns_oe_isr, NULL);
         }
         else {
-            intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, GPIO_INTR_NUM, pce_mt_oe_isr);
+            intexc_alloc_iram(BR_GPIO_INTR_SOURCE, GPIO_INTR_NUM, pce_mt_oe_isr, NULL);
         }
         pce_mt_task();
     }
 
     switch (config.out_cfg[0].dev_mode) {
         case DEV_KB:
-            intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, GPIO_INTR_NUM, pce_kb_oe_isr);
+            intexc_alloc_iram(BR_GPIO_INTR_SOURCE, GPIO_INTR_NUM, pce_kb_oe_isr, NULL);
             pce_kb_task();
             break;
         case DEV_MOUSE:
-            intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, GPIO_INTR_NUM, pce_mouse_oe_isr);
+            intexc_alloc_iram(BR_GPIO_INTR_SOURCE, GPIO_INTR_NUM, pce_mouse_oe_isr, NULL);
             pce_mouse_task();
             break;
         case DEV_PAD_ALT:
-            intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, GPIO_INTR_NUM, pce_6btns_oe_isr);
+            intexc_alloc_iram(BR_GPIO_INTR_SOURCE, GPIO_INTR_NUM, pce_6btns_oe_isr, NULL);
             pce_mt_task();
             break;
         default:

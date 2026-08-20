@@ -892,7 +892,8 @@ early_end:
     port->spi_hw->cmd.usr = 1;
 }
 
-static unsigned isr_dispatch(unsigned cause) {
+static void isr_dispatch(void *arg) {
+    const uint32_t cause = (uint32_t)arg;
     if (cause & SPI2_HSPI_INTR_MASK) {
         spi_isr((void *)&ps_ctrl_ports[0]);
     }
@@ -902,7 +903,7 @@ static unsigned isr_dispatch(unsigned cause) {
     if (cause & GPIO_INTR_MASK) {
         packet_end(NULL);
     }
-    return 0;
+    return;
 }
 
 void ps_spi_init(uint32_t package) {
@@ -1038,9 +1039,9 @@ inner_break:
         spi_init(&ps_ctrl_ports[i].cfg);
     }
 
-    intexc_alloc_iram(ETS_SPI2_INTR_SOURCE, SPI2_HSPI_INTR_NUM, isr_dispatch);
-    intexc_alloc_iram(ETS_SPI3_INTR_SOURCE, SPI3_VSPI_INTR_NUM, isr_dispatch);
-    intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, GPIO_INTR_NUM, isr_dispatch);
+    intexc_alloc_iram(ETS_SPI2_INTR_SOURCE, SPI2_HSPI_INTR_NUM, isr_dispatch, (void *)SPI2_HSPI_INTR_MASK);
+    intexc_alloc_iram(ETS_SPI3_INTR_SOURCE, SPI3_VSPI_INTR_NUM, isr_dispatch, (void *)SPI3_VSPI_INTR_MASK);
+    intexc_alloc_iram(BR_GPIO_INTR_SOURCE, GPIO_INTR_NUM, isr_dispatch, (void *)GPIO_INTR_MASK);
 }
 
 void ps_spi_port_cfg(uint16_t mask) {

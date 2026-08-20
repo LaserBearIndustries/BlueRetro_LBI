@@ -253,7 +253,8 @@ static void tx_hdlr(void) {
     }
 }
 
-static unsigned isr_dispatch(unsigned cause) {
+static void isr_dispatch(void *arg) {
+    const uint32_t cause = (uint32_t)arg;
     if (cause & UART1_INTR_MASK) {
         uart_isr((void *)&cdi_ctrl_ports[0]);
     }
@@ -263,7 +264,7 @@ static unsigned isr_dispatch(unsigned cause) {
     if (cause & GPIO_INTR_MASK) {
         rts_isr();
     }
-    return 0;
+    return;
 }
 #endif /* defined (CONFIG_BLUERETRO_SYSTEM_CDI */
 
@@ -354,9 +355,9 @@ void cdi_uart_init(uint32_t package) {
         memcpy(p->buffer, wired_adapter.data[i].output, 4);
     }
 
-    intexc_alloc_iram(ETS_UART1_INTR_SOURCE, UART1_INTR_NUM, isr_dispatch);
-    intexc_alloc_iram(ETS_UART2_INTR_SOURCE, UART2_INTR_NUM, isr_dispatch);
-    intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, GPIO_INTR_NUM, isr_dispatch);
+    intexc_alloc_iram(ETS_UART1_INTR_SOURCE, UART1_INTR_NUM, isr_dispatch, (void *)UART1_INTR_MASK);
+    intexc_alloc_iram(ETS_UART2_INTR_SOURCE, UART2_INTR_NUM, isr_dispatch, (void *)UART2_INTR_MASK);
+    intexc_alloc_iram(BR_GPIO_INTR_SOURCE, GPIO_INTR_NUM, isr_dispatch, (void *)GPIO_INTR_MASK);
 
     tx_hdlr();
 #endif /* defined (CONFIG_BLUERETRO_SYSTEM_CDI */

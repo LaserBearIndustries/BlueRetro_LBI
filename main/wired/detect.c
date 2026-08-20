@@ -43,7 +43,7 @@ static void detect_system(const uint32_t io, const uint8_t (*system_id)[4], cons
     }
 }
 
-static unsigned detect_isr(unsigned cause) {
+static void detect_isr(void *arg) {
     const uint32_t low_io = gpio_intr_status();
     const uint32_t high_io = gpio_intr_status1();
 
@@ -55,7 +55,7 @@ static unsigned detect_isr(unsigned cause) {
         detect_system(low_io, system_id_low, detect_pin_low);
         GPIO.status_w1tc.val = low_io;
     }
-    return 0;
+    return;
 }
 
 void detect_init(void) {
@@ -75,11 +75,11 @@ void detect_init(void) {
 
     adapter_init_buffer(0);
 
-    intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, 19, detect_isr);
+    intexc_alloc_iram(BR_GPIO_INTR_SOURCE, 19, detect_isr, NULL);
 }
 
 void detect_deinit(void) {
-    intexc_free_iram(ETS_GPIO_INTR_SOURCE, 19);
+    intexc_free_iram(BR_GPIO_INTR_SOURCE, 19);
 
     for (uint32_t i = 0; i < ARRAY_SIZE(pins); i++) {
         gpio_reset_iram(pins[i]);

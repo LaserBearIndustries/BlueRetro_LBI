@@ -242,7 +242,7 @@ static void jvs_parser(uint8_t *rx_buf, uint32_t rx_len, uint8_t *tx_buf, uint32
     }
 }
 
-static unsigned uart_rx(unsigned cause) {
+static void uart_rx(void *arg) {
     uint32_t intr_status = UART1.int_st.val;
 
     if (intr_status & UART_INTR_RXFIFO_TOUT) {
@@ -280,7 +280,7 @@ static unsigned uart_rx(unsigned cause) {
         GPIO.out_w1tc.val = JVS_RTS_MASK;
     }
     UART1.int_clr.val = intr_status;
-    return 0;
+    return;
 }
 #endif /* defined (CONFIG_BLUERETRO_SYSTEM_JVS */
 
@@ -348,6 +348,6 @@ void jvs_init(uint32_t package) {
     uart_ll_rxfifo_rst(&UART1);
     uart_ll_txfifo_rst(&UART1);
 
-    intexc_alloc_iram(ETS_UART1_INTR_SOURCE, 19, uart_rx);
+    intexc_alloc_iram(ETS_UART1_INTR_SOURCE, 19, uart_rx, NULL);
 #endif /* defined (CONFIG_BLUERETRO_SYSTEM_JVS */
 }

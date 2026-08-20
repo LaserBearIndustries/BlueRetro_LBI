@@ -91,7 +91,7 @@ static uint8_t power_off_pin = POWER_OFF_PIN;
 static uint8_t led_init_cnt = 1;
 static uint16_t port_state = 0;
 static RingbufHandle_t cmd_q_hdl = NULL;
-static uint32_t chip_package = EFUSE_RD_CHIP_VER_PKG_ESP32D0WDQ6;
+static uint32_t chip_package = 0;
 static bool factory_reset = false;
 #ifdef CONFIG_BLUERETRO_PWR_STATE_RESTORE
 static bool pwr_restore_done = false;

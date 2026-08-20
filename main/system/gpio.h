@@ -16,6 +16,7 @@
 #define _GPIO_H_
 
 #include "soc/gpio_sig_map.h"
+#include "soc/interrupts.h"
 #include "esp_rom_gpio.h"
 #include "soc/gpio_struct.h"
 #include "hal/gpio_types.h"
@@ -32,10 +33,15 @@
  * "what is pending for the line my handler is on", which used to be spelled
  * "what is pending for my core".
  *
- * Which line the wired driver ends up on is settled by the interrupt routing
- * in intr.c, which is not ported yet. INT_0 is the assumption until it is, and
- * this is the single place to change when that lands.
+ * The peripheral interrupt source and the status register are two halves of
+ * the same choice -- ETS_GPIO_INTR0_SOURCE is the line whose pending bits show
+ * up in intr_0 -- so they are defined together here. Changing the line means
+ * changing all three, and nothing outside this header should name either half.
+ *
+ * INT_0 is provisional. Which line the wired driver should own depends on the
+ * interrupt routing that comes with core 1 bring-up, which is not ported yet.
  */
+#define BR_GPIO_INTR_SOURCE ETS_GPIO_INTR0_SOURCE
 #define gpio_intr_status()  (GPIO.intr_0.val)
 #define gpio_intr_status1() (GPIO.intr_01.val)
 

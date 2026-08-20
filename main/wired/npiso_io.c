@@ -169,7 +169,7 @@ static inline void load_trackball_axes(uint8_t port) {
     }
 }
 
-static unsigned npiso_isr(unsigned cause) {
+static void npiso_isr(void *arg) {
     const uint32_t low_io = gpio_intr_status();
     const uint32_t high_io = gpio_intr_status1();
 
@@ -331,10 +331,10 @@ static unsigned npiso_isr(unsigned cause) {
     if (high_io) GPIO.status1_w1tc.val = high_io;
     if (low_io) GPIO.status_w1tc.val = low_io;
 
-    return 0;
+    return;
 }
 
-static unsigned npiso_fc_kb_isr(unsigned cause) {
+static void npiso_fc_kb_isr(void *arg) {
     const uint32_t low_io = gpio_intr_status();
     const uint32_t high_io = gpio_intr_status1();
 
@@ -382,11 +382,11 @@ static unsigned npiso_fc_kb_isr(unsigned cause) {
     if (high_io) GPIO.status1_w1tc.val = high_io;
     if (low_io) GPIO.status_w1tc.val = low_io;
 
-    return 0;
+    return;
 }
 
 #if 0
-static unsigned npiso_sfc_snes_5p_isr(unsigned cause) {
+static void npiso_sfc_snes_5p_isr(void *arg) {
     const uint32_t low_io = gpio_intr_status();
     const uint32_t high_io = gpio_intr_status1();
 
@@ -564,7 +564,7 @@ static unsigned npiso_sfc_snes_5p_isr(unsigned cause) {
     if (high_io) GPIO.status1_w1tc.val = high_io;
     if (low_io) GPIO.status_w1tc.val = low_io;
 
-    return 0;
+    return;
 }
 #endif
 
@@ -725,9 +725,9 @@ void npiso_init(uint32_t package)
     }
 
     if (dev_type[0] == DEV_FC_KB) {
-        intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, 19, npiso_fc_kb_isr);
+        intexc_alloc_iram(BR_GPIO_INTR_SOURCE, 19, npiso_fc_kb_isr, NULL);
     }
     else {
-        intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, 19, npiso_isr);
+        intexc_alloc_iram(BR_GPIO_INTR_SOURCE, 19, npiso_isr, NULL);
     }
 }

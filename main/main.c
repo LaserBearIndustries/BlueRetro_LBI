@@ -36,7 +36,7 @@
 #include "tests/coverage.h"
 #include "sdkconfig.h"
 
-static uint32_t chip_package = EFUSE_RD_CHIP_VER_PKG_ESP32D0WDQ6;
+static uint32_t chip_package = 0;
 
 static void wired_init_task(void) {
 #ifdef CONFIG_BLUERETRO_SYSTEM_UNIVERSAL

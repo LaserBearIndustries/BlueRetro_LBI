@@ -69,9 +69,33 @@
 
 #define VMU_BLOCK_SIZE 512
 
-#define wait_100ns() asm("movi a8, 5\n\tloop a8, waitend%=\n\tnop\n\twaitend%=:\n":::"a8");
-#define wait_500ns() asm("movi a8, 49\n\tloop a8, waitend%=\n\tnop\n\twaitend%=:\n":::"a8");
-#define wait_200ns() asm("movi a8, 16\n\tloop a8, waitend%=\n\tnop\n\twaitend%=:\n":::"a8");
+/* Sub-microsecond waits, one per edge of the bit-banged Maple frame.
+ *
+ * Upstream spelled these with the Xtensa zero-overhead LOOP instruction and
+ * iteration counts hand-tuned against a real Dreamcast at 240 MHz. Neither
+ * half survives the move: RISC-V has no LOOP, and the S31 runs at 320 MHz.
+ * What replaces it is an ordinary counted loop of an addi and a branch.
+ *
+ * THE COUNTS BELOW ARE ARITHMETIC, NOT MEASURED. They assume two cycles per
+ * iteration at 320 MHz, so one iteration is 6.25 ns. That assumption is the
+ * whole of their claim to correctness, and it is not a strong one: the S31 has
+ * a branch predictor and hardware loops where the LX6 was plainly in-order, so
+ * the per-iteration cost may not even be constant.
+ *
+ * Maple is a 2 Mbps bus and every one of these sits inside a bit period, so
+ * this driver should not be trusted until the waits have been checked on a
+ * logic analyser against real hardware. If they prove too jittery to tune, the
+ * fallback is a nop sled -- larger, but deterministic. See PORTING-S31.md.
+ */
+#define br_wait_iter(n) asm volatile (      \
+    "   li   t0, " #n "\n"                  \
+    "1: addi t0, t0, -1\n"                  \
+    "   bnez t0, 1b\n"                      \
+    ::: "t0")
+
+#define wait_100ns() br_wait_iter(16)
+#define wait_200ns() br_wait_iter(32)
+#define wait_500ns() br_wait_iter(80)
 #define maple_fix_byte(s, a, b) (s ? ((a << s) | (b >> (8 - s))) : b)
 
 struct maple_pkt {
@@ -278,7 +302,7 @@ static uint8_t maple_tx(uint32_t port, uint32_t maple0, uint32_t maple1, uint8_t
     return crc_ret;
 }
 
-static unsigned maple_rx(unsigned cause) {
+static void maple_rx(void *arg) {
     const uint32_t maple0 = gpio_intr_status();
     uint32_t timeout;
     uint32_t bit_cnt = 0;
@@ -663,27 +687,33 @@ maple_end:
 #endif
         GPIO.status_w1tc.val = maple0;
     }
-    return 0;
+    return;
 
 maple_abort:
     core0_stall_end();
     GPIO.status_w1tc.val = maple0;
-    return 0;
+    return;
 }
 
 void maple_init(uint32_t package)
 {
-#ifdef CONFIG_BLUERETRO_SYSTEM_DC
-    if (package == EFUSE_RD_CHIP_VER_PKG_ESP32PICOV302) {
-        port_cnt = 1;
-    }
-#endif
+    /* Upstream cut the Dreamcast down to a single port when it detected an
+     * ESP32-PICO-V3-02, because that module does not bond out enough pins for
+     * four. That was a constraint of the part, not a choice about the console,
+     * and it does not carry over: the S31 has 60 GPIOs. So port_cnt keeps its
+     * default of ARRAY_SIZE(gpio_pin) and all four ports stay available.
+     *
+     * gpio_pin itself is still the ESP32 map and has to be redone for this
+     * board -- that is where a real port-count limit would come from, if the
+     * final wiring imposes one.
+     */
+    (void)package;
 #ifndef CONFIG_BLUERETRO_WIRED_TRACE
     maple_port_cfg(0xF);
 #else
     maple_port_cfg(0x1);
 #endif
-    intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, 19, maple_rx);
+    intexc_alloc_iram(BR_GPIO_INTR_SOURCE, 19, maple_rx, NULL);
 }
 
 void maple_port_cfg(uint16_t mask) {

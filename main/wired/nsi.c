@@ -1004,7 +1004,7 @@ static void gc_pad_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     }
 }
 
-static unsigned n64_isr(unsigned cause) {
+static void n64_isr(void *arg) {
     const uint32_t intr_st = RMT.int_st.val;
     uint32_t status = intr_st;
     uint16_t item;
@@ -1103,10 +1103,10 @@ static unsigned n64_isr(unsigned cause) {
         }
     }
     RMT.int_clr.val = intr_st;
-    return 0;
+    return;
 }
 
-static unsigned gc_isr(unsigned cause) {
+static void gc_isr(void *arg) {
     const uint32_t intr_st = RMT.int_st.val;
     uint32_t status = intr_st;
     uint16_t item;
@@ -1184,7 +1184,7 @@ static unsigned gc_isr(unsigned cause) {
         }
     }
     RMT.int_clr.val = intr_st;
-    return 0;
+    return;
 }
 
 void nsi_init(uint32_t package) {
@@ -1225,7 +1225,7 @@ void nsi_init(uint32_t package) {
         rmt_ll_rx_enable(&RMT, rmt_ch[i][system], 1);
     }
 
-    intexc_alloc_iram(ETS_RMT_INTR_SOURCE, 19, wired_adapter.system_id == N64 ? n64_isr : gc_isr);
+    intexc_alloc_iram(ETS_RMT_INTR_SOURCE, 19, wired_adapter.system_id == N64 ? n64_isr : gc_isr, NULL);
 }
 
 void nsi_port_cfg(uint16_t mask) {

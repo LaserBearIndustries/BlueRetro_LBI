@@ -223,7 +223,7 @@ static inline void load_buffer(uint8_t port) {
     }
 }
 
-static unsigned latch_isr(unsigned cause) {
+static void latch_isr(void *arg) {
     const uint32_t low_io = gpio_intr_status();
     const uint32_t high_io = gpio_intr_status1();
     struct snes_ctrl_port *p;
@@ -286,7 +286,7 @@ static unsigned latch_isr(unsigned cause) {
 
     if (high_io) GPIO.status1_w1tc.val = high_io;
     if (low_io) GPIO.status_w1tc.val = low_io;
-    return 0;
+    return;
 }
 
 void snes_spi_init(uint32_t package) {
@@ -333,5 +333,5 @@ void snes_spi_init(uint32_t package) {
         spi_init(&p->cfg);
     }
 
-    intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, GPIO_INTR_NUM, latch_isr);
+    intexc_alloc_iram(BR_GPIO_INTR_SOURCE, GPIO_INTR_NUM, latch_isr, NULL);
 }
