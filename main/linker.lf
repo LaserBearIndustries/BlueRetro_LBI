@@ -8,22 +8,36 @@ entries:
     intr (noflash)
     led (noflash)
     delay (noflash)
-    detect (noflash)
     wired_bare (noflash)
-    cdi_uart (noflash)
-    jvs_uart (noflash)
-    maple (noflash)
-    npiso_io (noflash)
-    nsi (noflash)
-    pcfx_spi (noflash)
-    ps_spi (noflash)
-    real_spi (noflash)
-    snes_spi (noflash)
-    sega_io (noflash)
-    pce_io (noflash)
-    jag_io (noflash)
-    wii_i2c (noflash)
     devcrypto (noflash)
+    if BLUERETRO_DRV_DETECT = y:
+        detect (noflash)
+    if BLUERETRO_DRV_CDI_UART = y:
+        cdi_uart (noflash)
+    if BLUERETRO_DRV_JVS_UART = y:
+        jvs_uart (noflash)
+    if BLUERETRO_DRV_MAPLE = y:
+        maple (noflash)
+    if BLUERETRO_DRV_NPISO_IO = y:
+        npiso_io (noflash)
+    if BLUERETRO_DRV_NSI = y:
+        nsi (noflash)
+    if BLUERETRO_DRV_PCFX_SPI = y:
+        pcfx_spi (noflash)
+    if BLUERETRO_DRV_PS_SPI = y:
+        ps_spi (noflash)
+    if BLUERETRO_DRV_REAL_SPI = y:
+        real_spi (noflash)
+    if BLUERETRO_DRV_SNES_SPI = y:
+        snes_spi (noflash)
+    if BLUERETRO_DRV_SEGA_IO = y:
+        sega_io (noflash)
+    if BLUERETRO_DRV_PCE_IO = y:
+        pce_io (noflash)
+    if BLUERETRO_DRV_JAG_IO = y:
+        jag_io (noflash)
+    if BLUERETRO_DRV_WII_I2C = y:
+        wii_i2c (noflash)
 
 [sections:gcov_info]
 entries:

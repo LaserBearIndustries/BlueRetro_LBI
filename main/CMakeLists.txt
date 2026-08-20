@@ -58,7 +58,6 @@ set(srcs
     "adapter/adapter_debug.c"
     "bluetooth/debug.c"
     "system/delay.c"
-    "system/fpga_config.c"
     "system/fs.c"
     "system/gpio.c"
     "system/intr.c"
@@ -68,25 +67,28 @@ set(srcs
     "system/core0_stall_highint_hdl.S"
     "system/startup.c"
     "tools/stats.c"
-    "wired/detect.c"
     "wired/wired_bare.c"
     "wired/wired_rtos.c"
-    "wired/npiso_io.c"
-    "wired/cdi_uart.c"
-    "wired/pce_io.c"
-    "wired/sega_io.c"
-    "wired/nsi.c"
-    "wired/maple.c"
-    "wired/jvs_uart.c"
-    "wired/parallel.c"
-    "wired/pcfx_spi.c"
-    "wired/ps_spi.c"
-    "wired/real_spi.c"
-    "wired/snes_spi.c"
-    "wired/jag_io.c"
-    "wired/sea_io.c"
-    "wired/wii_i2c.c"
 )
+
+# Wired drivers, per the system choice. See the BLUERETRO_DRV_* block in
+# Kconfig.projbuild -- a UNIVERSAL build turns all of these on, which is the
+# old behaviour, while a single-system build compiles only what it uses.
+foreach(drv maple nsi npiso_io snes_spi pce_io sega_io cdi_uart real_spi
+            jag_io ps_spi pcfx_spi jvs_uart wii_i2c parallel detect)
+    string(TOUPPER "${drv}" drv_sym)
+    if(CONFIG_BLUERETRO_DRV_${drv_sym})
+        list(APPEND srcs "wired/${drv}.c")
+    endif()
+endforeach()
+
+# The SEA Board is the only user of the FPGA bitstream loader.
+if(CONFIG_BLUERETRO_DRV_SEA_IO)
+    list(APPEND srcs
+        "wired/sea_io.c"
+        "system/fpga_config.c"
+    )
+endif()
 
 if(CONFIG_BLUERETRO_WS_CMDS)
     list(APPEND srcs

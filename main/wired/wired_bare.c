@@ -5,24 +5,90 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "npiso_io.h"
-#include "cdi_uart.h"
-#include "sega_io.h"
-#include "pce_io.h"
-#include "nsi.h"
-#include "maple.h"
-#include "jvs_uart.h"
-#include "pcfx_spi.h"
-#include "ps_spi.h"
-#include "real_spi.h"
-#include "snes_spi.h"
-#include "jag_io.h"
-#include "wii_i2c.h"
 #include "adapter/adapter.h"
 #include "wired_bare.h"
 
+/* Only the drivers the selected system needs are compiled; see the
+ * BLUERETRO_DRV_* block in Kconfig.projbuild. A driver that is left out has no
+ * header to include and no entry point to name, so its slots in the dispatch
+ * tables below resolve to NULL and wired_bare_init() skips it exactly as it
+ * already does for the systems that never had a bare driver. A UNIVERSAL build
+ * turns everything on and is unchanged.
+ */
+#ifdef CONFIG_BLUERETRO_DRV_NPISO_IO
+#include "npiso_io.h"
+#else
+#define npiso_init NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_CDI_UART
+#include "cdi_uart.h"
+#else
+#define cdi_uart_init NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_SEGA_IO
+#include "sega_io.h"
+#else
+#define sega_io_init NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_PCE_IO
+#include "pce_io.h"
+#else
+#define pce_io_init NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_NSI
+#include "nsi.h"
+#else
+#define nsi_init NULL
+#define nsi_port_cfg NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_MAPLE
+#include "maple.h"
+#else
+#define maple_init NULL
+#define maple_port_cfg NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_JVS_UART
+#include "jvs_uart.h"
+#else
+#define jvs_init NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_PCFX_SPI
+#include "pcfx_spi.h"
+#else
+#define pcfx_spi_init NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_PS_SPI
+#include "ps_spi.h"
+#else
+#define ps_spi_init NULL
+#define ps_spi_port_cfg NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_REAL_SPI
+#include "real_spi.h"
+#else
+#define real_spi_init NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_SNES_SPI
+#include "snes_spi.h"
+#else
+#define snes_spi_init NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_JAG_IO
+#include "jag_io.h"
+#else
+#define jag_io_init NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_WII_I2C
+#include "wii_i2c.h"
+#else
+#define wii_i2c_init NULL
+#define wii_i2c_port_cfg NULL
+#endif
+
+#ifdef CONFIG_BLUERETRO_DRV_SPI_SLAVE
 #define SPI_LL_RST_MASK (SPI_OUT_RST | SPI_IN_RST | SPI_AHBM_RST | SPI_AHBM_FIFO_RST)
 #define SPI_LL_UNUSED_INT_MASK  (SPI_INT_EN | SPI_SLV_WR_STA_DONE | SPI_SLV_RD_STA_DONE | SPI_SLV_WR_BUF_DONE | SPI_SLV_RD_BUF_DONE)
+#endif
 
 typedef void (*wired_init_t)(uint32_t package);
 typedef void (*wired_port_cfg_t)(uint16_t mask);
@@ -124,6 +190,7 @@ const char *wired_get_sys_name(void) {
     return sys_name[wired_adapter.system_id];
 }
 
+#ifdef CONFIG_BLUERETRO_DRV_SPI_SLAVE
 void spi_init(struct spi_cfg *cfg) {
     cfg->hw->clock.val = 0;
     cfg->hw->user.val = 0;
@@ -171,3 +238,4 @@ void spi_init(struct spi_cfg *cfg) {
     cfg->hw->slave.trans_done = 0;
     cfg->hw->cmd.usr = 1;
 }
+#endif /* CONFIG_BLUERETRO_DRV_SPI_SLAVE */

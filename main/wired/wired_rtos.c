@@ -4,10 +4,22 @@
  */
 
 #include <stddef.h>
-#include "parallel.h"
-#include "sea_io.h"
 #include "adapter/adapter.h"
 #include "wired_rtos.h"
+
+/* As in wired_bare.c: a driver the selected system does not need is not
+ * compiled, and its table slots resolve to NULL.
+ */
+#ifdef CONFIG_BLUERETRO_DRV_PARALLEL
+#include "parallel.h"
+#else
+#define parallel_io_init NULL
+#endif
+#ifdef CONFIG_BLUERETRO_DRV_SEA_IO
+#include "sea_io.h"
+#else
+#define sea_init NULL
+#endif
 
 typedef void (*wired_init_t)(void);
 

@@ -6,7 +6,9 @@
 #ifndef _WIRED_BARE_H_
 #define _WIRED_BARE_H_
 
+#ifdef CONFIG_BLUERETRO_DRV_SPI_SLAVE
 #include <soc/spi_periph.h>
+#endif
 
 #if defined(CONFIG_BLUERETRO_SYSTEM_PARALLEL_1P)
 #define HARDCODED_SYS PARALLEL_1P
@@ -58,6 +60,7 @@
 #define HARDCODED_SYS wired_adapter.system_id
 #endif
 
+#ifdef CONFIG_BLUERETRO_DRV_SPI_SLAVE
 struct spi_cfg {
     spi_dev_t *hw;
     uint32_t write_bit_order;
@@ -73,9 +76,13 @@ struct spi_cfg {
     uint32_t inten;
 };
 
+#endif /* CONFIG_BLUERETRO_DRV_SPI_SLAVE */
+
 void wired_bare_init(uint32_t package);
 void wired_bare_port_cfg(uint16_t mask);
 const char *wired_get_sys_name(void);
+#ifdef CONFIG_BLUERETRO_DRV_SPI_SLAVE
 void spi_init(struct spi_cfg *cfg);
+#endif
 
 #endif /* _WIRED_BARE_H_ */

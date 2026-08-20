@@ -276,6 +276,90 @@ menu "BlueRetro"
 
     endchoice
 
+    # Which wired drivers a build actually needs, derived from the system choice
+    # above. Several drivers serve more than one console (nsi does N64 and GC,
+    # sega_io does Genesis and Saturn, ps_spi does PSX and PS2), so the gate has
+    # to be per driver rather than per system.
+    #
+    # These are not user-visible; pick a system and the right set follows. A
+    # UNIVERSAL build enables everything, which is the old behaviour.
+    #
+    # This matters for the ESP32-S31 port: each driver still carries ESP32
+    # peripheral register access, so a single-system build only has to be ported
+    # far enough to compile the one driver it uses.
+
+    config BLUERETRO_DRV_MAPLE
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_DC
+
+    config BLUERETRO_DRV_NSI
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_N64 || BLUERETRO_SYSTEM_GC
+
+    config BLUERETRO_DRV_NPISO_IO
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_NES || BLUERETRO_SYSTEM_VBOY
+
+    config BLUERETRO_DRV_SNES_SPI
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_SNES
+
+    config BLUERETRO_DRV_PCE_IO
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_PCE
+
+    config BLUERETRO_DRV_SEGA_IO
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_GENESIS || BLUERETRO_SYSTEM_SATURN
+
+    config BLUERETRO_DRV_CDI_UART
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_CDI
+
+    config BLUERETRO_DRV_REAL_SPI
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_3DO
+
+    config BLUERETRO_DRV_JAG_IO
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_JAGUAR
+
+    config BLUERETRO_DRV_PS_SPI
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_PSX_PS2
+
+    config BLUERETRO_DRV_PCFX_SPI
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_PCFX
+
+    config BLUERETRO_DRV_JVS_UART
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_JVS
+
+    config BLUERETRO_DRV_WII_I2C
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_WII_EXT
+
+    config BLUERETRO_DRV_SEA_IO
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_SEA_BOARD
+
+    config BLUERETRO_DRV_PARALLEL
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL || BLUERETRO_SYSTEM_PARALLEL_1P || BLUERETRO_SYSTEM_PARALLEL_2P || BLUERETRO_SYSTEM_PARALLEL_1P_OD || BLUERETRO_SYSTEM_PARALLEL_2P_OD
+
+    # wired_bare.c's spi_init() drives the ESP32 SPI slave peripheral and exists
+    # only for the four SPI-based drivers. Nothing else needs it.
+    config BLUERETRO_DRV_SPI_SLAVE
+        bool
+        default y if BLUERETRO_DRV_PS_SPI || BLUERETRO_DRV_PCFX_SPI || BLUERETRO_DRV_REAL_SPI || BLUERETRO_DRV_SNES_SPI
+
+    # Port auto-detection only runs on a UNIVERSAL build; a single-system build
+    # already knows what it is talking to.
+    config BLUERETRO_DRV_DETECT
+        bool
+        default y if BLUERETRO_SYSTEM_UNIVERSAL
+
     menu "Debug"
 
         config BLUERETRO_QEMU
