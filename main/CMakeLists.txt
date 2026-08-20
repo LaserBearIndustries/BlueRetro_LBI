@@ -86,7 +86,6 @@ set(srcs
     "wired/jag_io.c"
     "wired/sea_io.c"
     "wired/wii_i2c.c"
-    "zephyr/atomic.S"
 )
 
 if(CONFIG_BLUERETRO_WS_CMDS)
@@ -160,6 +159,10 @@ if(CONFIG_BLUERETRO_COVERAGE)
 endif()
 
 idf_build_set_property(COMPILE_DEFINITIONS "-DBLUERETRO" APPEND)
+# S31 is RV32IMAFCP, so the A extension gives us real lr.w/sc.w/amo* across both
+# HP cores. Use the GCC __atomic_* builtin path in zephyr/atomic.h rather than
+# the Xtensa asm implementation that used to live in zephyr/atomic.S.
+idf_build_set_property(COMPILE_DEFINITIONS "-DCONFIG_ATOMIC_OPERATIONS_BUILTIN" APPEND)
 idf_build_set_property(COMPILE_DEFINITIONS "-DXT_INTEXC_HOOKS" APPEND)
 
 target_link_libraries(${COMPONENT_TARGET} "-u ld_include_my_startup_file")
