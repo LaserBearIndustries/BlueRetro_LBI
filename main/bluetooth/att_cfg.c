@@ -19,6 +19,7 @@
 #include "adapter/gameid.h"
 #include "system/manager.h"
 #include "system/fs.h"
+#include "system/dev_status.h"
 
 #define ATT_MAX_LEN 512
 #define BR_ABI_VER 2
@@ -30,6 +31,7 @@
 #define CFG_CMD_GET_CFG_SRC 0x05
 #define CFG_CMD_GET_FILE 0x06
 #define CFG_CMD_GET_FW_NAME 0x07
+#define CFG_CMD_GET_DEV_LIST 0x08
 #define CFG_CMD_SET_DEFAULT_CFG 0x10
 #define CFG_CMD_SET_GAMEID_CFG 0x11
 #define CFG_CMD_OPEN_DIR 0x12
@@ -92,6 +94,12 @@ static uint16_t in_cfg_offset = 0;
 static uint16_t in_cfg_id = 0;
 static uint32_t mc_offset = 0;
 static uint8_t cfg_cmd = 0;
+/* Taken once when the command is written, not per read. At 148 bytes the
+ * answer needs several blob reads to get out, and a controller connecting
+ * partway through would otherwise splice two different states into one
+ * reply - a port that reads as empty in its header and occupied in its
+ * body. Sampling on the write makes each answer a single instant. */
+static struct dev_status dev_list_snapshot;
 static DIR *d = NULL;
 static struct dirent *dir = NULL;
 
@@ -356,6 +364,29 @@ static void bt_att_cfg_cmd_cfg_src_rsp(uint16_t handle) {
     bt_att_cmd(handle, BT_ATT_OP_READ_RSP, 1);
 }
 
+/* The one cfg command whose answer does not fit a single reply, so unlike its
+ * neighbours it takes an offset and gets read out over blob requests. Reading
+ * past the end returns zero bytes, which is how the far end learns it has the
+ * whole thing without being told the length up front. */
+static void bt_att_cfg_cmd_dev_list_rsp(uint16_t handle, uint16_t offset) {
+    uint32_t len;
+
+    if (offset >= sizeof(dev_list_snapshot)) {
+        len = 0;
+    }
+    else {
+        len = sizeof(dev_list_snapshot) - offset;
+
+        if (len > (uint32_t)(mtu - 1)) {
+            len = mtu - 1;
+        }
+
+        memcpy(bt_hci_pkt_tmp.att_data, (uint8_t *)&dev_list_snapshot + offset, len);
+    }
+
+    bt_att_cmd(handle, offset ? BT_ATT_OP_READ_BLOB_RSP : BT_ATT_OP_READ_RSP, len);
+}
+
 static void bt_att_cfg_cmd_file_rsp(uint16_t handle) {
     uint32_t len;
 
@@ -439,9 +470,28 @@ static void bt_att_cfg_cmd_rd_hdlr(uint16_t handle) {
         case CFG_CMD_GET_FW_NAME:
             bt_att_cfg_cmd_fw_name_rsp(handle);
             break;
+        case CFG_CMD_GET_DEV_LIST:
+            bt_att_cfg_cmd_dev_list_rsp(handle, 0);
+            break;
         default:
             printf("# Invalid read cfg cmd: %02X\n", cfg_cmd);
             bt_att_cfg_cmd_abi_ver_rsp(handle);
+            break;
+    }
+}
+
+/* Blob reads on the command channel. Only the device list is long enough to
+ * need them; every other command answers in one reply, and saying so with
+ * ATTRIBUTE_NOT_LONG is more use to a client than silently returning the
+ * wrong command's bytes. */
+static void bt_att_cfg_cmd_blob_hdlr(uint16_t handle, uint16_t offset) {
+    switch (cfg_cmd) {
+        case CFG_CMD_GET_DEV_LIST:
+            bt_att_cfg_cmd_dev_list_rsp(handle, offset);
+            break;
+        default:
+            bt_att_cmd_error_rsp(handle, BT_ATT_OP_READ_BLOB_REQ, BR_CFG_CMD_CHRC_HDL,
+                BT_ATT_ERR_ATTRIBUTE_NOT_LONG);
             break;
     }
 }
@@ -450,6 +500,11 @@ static void bt_att_cfg_cmd_wr_hdlr(struct bt_dev *device, uint8_t *data, uint32_
     cfg_cmd = data[0];
 
     switch (cfg_cmd) {
+        case CFG_CMD_GET_DEV_LIST:
+            /* Sampled here rather than on the read that follows, so the whole
+             * answer describes one moment. See dev_list_snapshot. */
+            dev_status_get(&dev_list_snapshot);
+            break;
         case CFG_CMD_SET_DEFAULT_CFG:
         {
             char tmp_str[32] = "/fs/";
@@ -676,6 +731,9 @@ void bt_att_cfg_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt, u
                     break;
                 case BR_MC_DATA_CHRC_HDL:
                     bt_att_cmd_mc_rd_rsp(device->acl_handle, 1);
+                    break;
+                case BR_CFG_CMD_CHRC_HDL:
+                    bt_att_cfg_cmd_blob_hdlr(device->acl_handle, rd_blob_req->offset);
                     break;
                 default:
                     bt_att_cmd_error_rsp(device->acl_handle, BT_ATT_OP_READ_BLOB_REQ, rd_blob_req->handle, BT_ATT_ERR_INVALID_HANDLE);
