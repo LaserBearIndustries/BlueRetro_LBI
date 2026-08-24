@@ -19,6 +19,11 @@ enum {
     SYS_MGR_CMD_WIRED_RST,
 };
 
+/* True when the port sense input says a wired controller is in that port.
+ * Always false on hardware without the sense pins, where it is unknowable
+ * rather than absent. */
+uint32_t sys_mgr_port_is_wired(uint32_t port);
+
 void sys_mgr_cmd(uint8_t cmd);
 void sys_mgr_early_pwr_restore(void);
 void sys_mgr_init(uint32_t package);

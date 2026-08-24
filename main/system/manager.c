@@ -132,6 +132,24 @@ static inline uint32_t sense_port_is_empty(uint32_t index) {
 #endif
 }
 
+/* The inverse, for anything outside this file that wants to know what is
+ * physically in a port rather than how the ports get handed out.
+ *
+ * Not simply !sense_port_is_empty(): without the HW2 sense pins there is no
+ * way to tell, and that case has to report not-wired rather than wired, or
+ * every port would claim a controller that is not there. */
+uint32_t sys_mgr_port_is_wired(uint32_t port) {
+#ifdef CONFIG_BLUERETRO_HW2
+    if (port >= hw_config.port_cnt) {
+        return 0;
+    }
+    return !sense_port_is_empty(port);
+#else
+    (void)port;
+    return 0;
+#endif
+}
+
 static inline void set_power_on(uint32_t state) {
     if (hw_config.power_pin_polarity) {
         gpio_set_level(POWER_ON_PIN, !state);

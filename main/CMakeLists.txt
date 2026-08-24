@@ -50,6 +50,7 @@ set(cov_srcs
     "bluetooth/hidp/sw.c"
     "bluetooth/hidp/sw2.c"
     "system/manager.c"
+    "system/dev_status.c"
     "tools/devcrypto.c"
     "tools/ps1_gameid.c"
 )
