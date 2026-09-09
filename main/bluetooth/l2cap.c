@@ -416,6 +416,9 @@ void bt_l2cap_le_sig_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_p
             le_conn_update.min_ce_len = 0;
             le_conn_update.max_ce_len = 0;
 
+            /* Its parameters, its call. Do not tighten them afterwards. */
+            atomic_set_bit(&device->flags, BT_DEV_LE_PARAM_SET);
+
             bt_l2cap_cmd_conn_param_rsp(device->acl_handle, rx_ident, BT_L2CAP_CONN_PARAM_ACCEPTED);
             bt_hci_le_conn_update(&le_conn_update);
             break;

@@ -49,7 +49,26 @@ enum {
     BT_DEV_FB_DELAY,
     BT_DEV_CALIB_SET,
     BT_DEV_PPCP_DONE,
+    /* The link is on parameters somebody chose deliberately: either the
+     * device asked for its own, or we have already tightened the
+     * supervision timeout after init. Either way, leave it alone. */
+    BT_DEV_LE_PARAM_SET,
 };
+
+/* Supervision timeout for an established LE link, in 10 ms units.
+ *
+ * Connecting uses 20 s, because a second controller's init has to be able
+ * to run alongside an existing link without the new one timing out
+ * mid-sequence. Once init is done that headroom costs something instead:
+ * a controller switched off sends no disconnect, so the link - and the
+ * console port with it - is held until this expires. Twenty seconds of a
+ * phantom controller is long enough to look broken, and it is, to any game
+ * that asks which ports are occupied.
+ *
+ * Five seconds still rides out an ordinary bit of radio interference.
+ * Lower it and a controller carried out of the room comes back
+ * disconnected; raise it and an empty port stays claimed for longer. */
+#define BT_LE_LINKED_TIMEOUT 500
 
 struct bt_name_type {
     char name[249];

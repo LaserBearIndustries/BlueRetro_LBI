@@ -323,6 +323,38 @@ static void bt_host_task(void *param) {
                 }
             }
 
+            /* Init is done, so the long connect-time supervision timeout
+             * has served its purpose and is now just a port held open
+             * after a controller is switched off. See the note on
+             * BT_LE_LINKED_TIMEOUT.
+             *
+             * Skipped for a device that asked for its own parameters:
+             * overriding those would change the interval it chose as well
+             * as the timeout, and it knows what it wants better than this
+             * does. Such a device keeps whatever it negotiated. */
+            if (atomic_test_bit(&device->flags, BT_DEV_IS_BLE)
+                    && atomic_test_bit(&device->flags, BT_DEV_HID_INIT_DONE)
+                    && !atomic_test_bit(&device->flags, BT_DEV_LE_PARAM_SET)) {
+                struct hci_cp_le_conn_update le_conn_update = {0};
+
+                atomic_set_bit(&device->flags, BT_DEV_LE_PARAM_SET);
+
+                /* The interval and latency the link was made with; only
+                 * the timeout is being changed. */
+                le_conn_update.handle = device->acl_handle;
+                le_conn_update.conn_interval_min = 6;
+                le_conn_update.conn_interval_max = 12;
+                le_conn_update.conn_latency = 0;
+                le_conn_update.supervision_timeout = BT_LE_LINKED_TIMEOUT;
+
+                printf("# dev: %ld linked, supervision timeout to %d ms\n",
+                    device->ids.id, BT_LE_LINKED_TIMEOUT * 10);
+                bt_mon_log(true, "dev: %ld linked, supervision timeout to %d ms\n",
+                    device->ids.id, BT_LE_LINKED_TIMEOUT * 10);
+
+                bt_hci_le_conn_update(&le_conn_update);
+            }
+
             /* Parse SDP data if available */
             if (atomic_test_bit(&device->flags, BT_DEV_DEVICE_FOUND)) {
                 if (atomic_test_bit(&device->flags, BT_DEV_SDP_DATA)) {

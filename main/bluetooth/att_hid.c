@@ -403,6 +403,9 @@ static void bt_att_hid_process_ppcp_cfg(struct bt_dev *device,
         le_conn_update.min_ce_len = 0;
         le_conn_update.max_ce_len = 0;
 
+        /* Published its preferred parameters, so they stand. */
+        atomic_set_bit(&device->flags, BT_DEV_LE_PARAM_SET);
+
         bt_hci_le_conn_update(&le_conn_update);
     }
     bt_att_hid_start_next_state(device, hid_data);
