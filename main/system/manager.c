@@ -94,6 +94,16 @@ static uint16_t port_state = 0;
  * the wired driver. Separate from port_state, which is about which pins this
  * adapter drives at all. */
 static uint16_t port_present = 0;
+
+/* Whether port_present has ever been handed to the wired driver.
+ *
+ * Without this the first push never happens in the one case that matters.
+ * The driver starts out assuming every port is occupied, this starts at
+ * zero, and with no controller connected the computed mask is also zero -
+ * so nothing differs, nothing is sent, and every port goes on claiming a
+ * controller. That is exactly the console with four GBAs and no pads, ie.
+ * the case the whole thing was written for. */
+static uint8_t port_present_sent = 0;
 static RingbufHandle_t cmd_q_hdl = NULL;
 static uint32_t chip_package = EFUSE_RD_CHIP_VER_PKG_ESP32D0WDQ6;
 static bool factory_reset = false;
@@ -399,9 +409,10 @@ static void wired_port_hdl(void) {
     /* Independent of the port_cfg update below, which is rate limited by
      * the memory card being idle. Nothing here touches a pin or a stored
      * byte; it sets a mask an interrupt reads. */
-    if (port_present != present_mask) {
+    if (!port_present_sent || port_present != present_mask) {
         printf("# %s: Ports with a controller: %04X\n",
             __FUNCTION__, present_mask);
+        port_present_sent = 1;
         port_present = present_mask;
         wired_bare_port_present(present_mask);
     }
