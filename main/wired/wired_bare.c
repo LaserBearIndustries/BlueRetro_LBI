@@ -120,6 +120,16 @@ void wired_bare_port_cfg(uint16_t mask) {
     }
 }
 
+/* Only GC answers this. Every other system either has no notion of an
+ * empty port on the wire or has not been looked at, and reporting a port
+ * empty on a console that does not expect it is not a change to make
+ * blind. */
+void wired_bare_port_present(uint16_t mask) {
+    if (wired_adapter.system_id == GC) {
+        nsi_port_present(mask);
+    }
+}
+
 const char *wired_get_sys_name(void) {
     return sys_name[wired_adapter.system_id];
 }

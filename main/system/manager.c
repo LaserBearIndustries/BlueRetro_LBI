@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2019-2024, Jacques Gagnon
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -90,6 +90,10 @@ static uint8_t err_led_pin;
 static uint8_t power_off_pin = POWER_OFF_PIN;
 static uint8_t led_init_cnt = 1;
 static uint16_t port_state = 0;
+/* Which ports currently have a controller behind them, as last reported to
+ * the wired driver. Separate from port_state, which is about which pins this
+ * adapter drives at all. */
+static uint16_t port_present = 0;
 static RingbufHandle_t cmd_q_hdl = NULL;
 static uint32_t chip_package = EFUSE_RD_CHIP_VER_PKG_ESP32D0WDQ6;
 static bool factory_reset = false;
@@ -311,6 +315,7 @@ static void power_on_hdl(void) {
 static void wired_port_hdl(void) {
     uint32_t update = 0;
     uint16_t port_mask = 0;
+    uint16_t present_mask = 0;
     uint8_t err_led_set = 0;
 
     for (int32_t i = 0, j = 0, idx = 0; i < BT_MAX_DEV; i++) {
@@ -336,6 +341,15 @@ static void wired_port_hdl(void) {
         device->ids.out_idx = idx;
         if ((hw_config.hotplug && bt_ready) || !hw_config.hotplug) {
             port_mask |= BIT(idx) | adapter_get_out_mask(idx);
+        }
+
+        /* Always gated on the device being ready, whatever hotplug says.
+         * port_mask decides which pins this adapter drives at all; this
+         * decides which of those it answers as a controller on. A port
+         * with a wired pad in it is not in either, because port_mask has
+         * already detached it so the pad can talk to the console itself. */
+        if (bt_ready) {
+            present_mask |= BIT(idx) | adapter_get_out_mask(idx);
         }
         idx++;
 
@@ -382,6 +396,16 @@ static void wired_port_hdl(void) {
             update++;
         }
     }
+    /* Independent of the port_cfg update below, which is rate limited by
+     * the memory card being idle. Nothing here touches a pin or a stored
+     * byte; it sets a mask an interrupt reads. */
+    if (port_present != present_mask) {
+        printf("# %s: Ports with a controller: %04X\n",
+            __FUNCTION__, present_mask);
+        port_present = present_mask;
+        wired_bare_port_present(present_mask);
+    }
+
     if (update && !mc_get_state()) {
         printf("# %s: Update ports state: %04X\n", __FUNCTION__, port_mask);
         wired_bare_port_cfg(port_mask);

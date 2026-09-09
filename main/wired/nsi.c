@@ -143,6 +143,28 @@ static const uint8_t nsi_crc_table[256] = {
 };
 
 static const uint8_t gc_ident[3] = {0x09, 0x00, 0x20};
+
+/* Which ports have a controller behind them.
+ *
+ * Every port used to answer the identify command whether anything was
+ * connected to it or not, so a console with one pad saw four. Mostly
+ * harmless - the other three read as a pad sitting still - until a game
+ * cares who is actually there. Final Fantasy Crystal Chronicles wants GBAs
+ * on the ports and refuses to start if it finds a controller on one, so
+ * with this adapter fitted it refused every time.
+ *
+ * Defaults to everything present, so a build that never calls
+ * nsi_port_present() behaves as it always did. Ports going quiet because
+ * something forgot to tell us about them would be a far worse failure than
+ * the one being fixed.
+ *
+ * This is not the same question as nsi_port_cfg(). That one detaches the
+ * pin entirely and is how a port with a real wired pad in it gets out of
+ * the way so the console can talk to the pad directly. A port that is
+ * merely empty stays attached, because the companion app reaches the
+ * adapter through these same pins and has to keep working when no
+ * controller is connected - which is exactly when somebody needs it. */
+static volatile uint16_t gc_present_mask = 0xFFFF;
 static const uint8_t gc_kb_ident[3] = {0x08, 0x20, 0x00};
 static const uint8_t gc_neutral[] = {
     0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x20, 0x20, 0x00, 0x00
@@ -816,8 +838,44 @@ static void gc_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     }
 }
 
+/* Nothing to say, but the receiver still has to be put back: only the TX
+ * end path re-arms it, and staying silent transmits nothing. Miss this and
+ * the port goes deaf until the next power cycle. */
+static inline void gc_go_back_rx(uint8_t channel) {
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 1;
+    RMT.conf_ch[channel].conf1.mem_rd_rst = 0;
+    RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_HW;
+    RMT.conf_ch[channel].conf1.rx_en = 1;
+}
+
+/* The commands that amount to "I am a controller": identify, poll and
+ * origin. An empty port answers none of them and the console reads it as
+ * empty, which is what it is.
+ *
+ * The vendor opcodes are deliberately not in here. They are how the
+ * companion app talks to the adapter, and an adapter that could only be
+ * configured while a controller happened to be paired to it would be
+ * unreachable in most of the situations somebody opens the app for. */
+static inline uint32_t gc_cmd_is_pad(uint8_t cmd) {
+    switch (cmd) {
+        case 0x00:
+        case 0x40:
+        case 0x41:
+        case 0x42:
+        case 0x43:
+        case 0xFF:
+            return 1;
+    }
+    return 0;
+}
+
 static void gc_pad_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     uint8_t crc;
+
+    if (!(gc_present_mask & BIT(port)) && gc_cmd_is_pad(buf[0])) {
+        gc_go_back_rx(channel);
+        return;
+    }
 
     switch (buf[0]) {
         case GAME_ID_CMD:
@@ -1238,6 +1296,10 @@ void nsi_init(uint32_t package) {
     }
 
     intexc_alloc_iram(ETS_RMT_INTR_SOURCE, 19, wired_adapter.system_id == N64 ? n64_isr : gc_isr);
+}
+
+void nsi_port_present(uint16_t mask) {
+    gc_present_mask = mask;
 }
 
 void nsi_port_cfg(uint16_t mask) {
