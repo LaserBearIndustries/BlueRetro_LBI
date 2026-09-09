@@ -17,6 +17,7 @@
 #include "adapter/adapter.h"
 #include "adapter/config.h"
 #include "adapter/memory_card.h"
+#include "bluetooth/mon.h"
 #include "adapter/wired/n64.h"
 #include "adapter/wired/gc.h"
 #include "system/gc_boot.h"
@@ -838,6 +839,62 @@ static void gc_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
     }
 }
 
+#ifdef CONFIG_BLUERETRO_GC_SNIFF
+/* Listen-only capture of one port, for reverse engineering what the
+ * console and a real device say to each other - the GameCube to GBA link
+ * being the reason this exists.
+ *
+ * SI is one open-drain wire, so both directions are already on it and a
+ * port that receives without ever answering sees the whole conversation.
+ * The console request and the device reply arrive as two separate RX
+ * events, because the turnaround gap exceeds the idle threshold, and they
+ * pair up by timestamp when the log is read back.
+ *
+ * One port only, and never the whole adapter: the companion app is how
+ * the capture gets off the device, and it needs some port still answering
+ * the vendor opcodes to do that.
+ */
+#define GC_SNIFF_PORT CONFIG_BLUERETRO_GC_SNIFF_PORT
+
+/* One SI frame is a handful of bytes. This is far more than any of them
+ * and still small enough to build on the stack in an interrupt. */
+#define GC_SNIFF_MAX 40
+
+/* How many bits actually landed. The RX ends on an idle gap and the RMT
+ * writes a zero duration item to mark it, so the run of non-zero items is
+ * the frame. Without this the decoder would read a fixed length and pad
+ * every short frame with whatever the previous one left behind. */
+static inline uint32_t gc_sniff_bit_cnt(uint32_t item) {
+    uint32_t n = 0;
+
+    while (n < RMT_MEM_ITEM_NUM && (rmt_items[item + n].val & 0x7FFF)) {
+        n++;
+    }
+    return n;
+}
+
+static void IRAM_ATTR gc_sniff_frame(uint8_t channel, uint8_t port) {
+    uint8_t rec[1 + GC_SNIFF_MAX];
+    uint32_t base = channel * RMT_MEM_ITEM_NUM;
+    uint32_t bits = gc_sniff_bit_cnt(base);
+    uint32_t bytes = bits / 8;
+
+    if (bytes == 0) {
+        return;
+    }
+    if (bytes > GC_SNIFF_MAX) {
+        bytes = GC_SNIFF_MAX;
+    }
+
+    /* Port first, so a capture with more than one thing on the bus can
+     * still be told apart when it is read back. */
+    rec[0] = port;
+    nsi_items_to_bytes(base, &rec[1], bytes);
+
+    bt_mon_tx(BT_MON_SI_FRAME, rec, bytes + 1);
+}
+#endif /* CONFIG_BLUERETRO_GC_SNIFF */
+
 /* Nothing to say, but the receiver still has to be put back: only the TX
  * end path re-arms it, and staying silent transmits nothing. Miss this and
  * the port goes deaf until the next power cycle. */
@@ -1204,6 +1261,16 @@ static unsigned gc_isr(unsigned cause) {
                 RMT.conf_ch[channel].conf1.rx_en = 0;
                 RMT.conf_ch[channel].conf1.mem_owner = RMT_LL_MEM_OWNER_SW;
                 RMT.conf_ch[channel].conf1.mem_wr_rst = 1;
+#ifdef CONFIG_BLUERETRO_GC_SNIFF
+                if (port == GC_SNIFF_PORT) {
+                    /* Answering would collide with the real device on the
+                     * far end of the cable, which is the thing being
+                     * listened to. Log it and go straight back to RX. */
+                    gc_sniff_frame(channel, port);
+                    gc_go_back_rx(channel);
+                    break;
+                }
+#endif
                 item = nsi_items_to_bytes(channel * RMT_MEM_ITEM_NUM, buf, 1);
                 switch (config.out_cfg[port].dev_mode) {
                     case DEV_KB:

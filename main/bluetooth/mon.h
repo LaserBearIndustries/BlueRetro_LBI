@@ -14,6 +14,11 @@
 #define BT_MON_ACL_RX 5
 #define BT_MON_SYS_NOTE 12
 
+/* Not a btmon opcode. Above everything the format defines so a decoder
+ * that does not know it still walks the records correctly and simply
+ * names this one unknown. Payload is [port][raw SI bytes]. */
+#define BT_MON_SI_FRAME 0x51
+
 #ifdef CONFIG_BLUERETRO_BTMON_VERBOSE
 #define BT_MON_LOG(...) bt_mon_log(true, __VA_ARGS__)
 #else

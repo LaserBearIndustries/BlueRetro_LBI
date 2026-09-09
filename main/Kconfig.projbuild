@@ -96,6 +96,39 @@ menu "BlueRetro"
             factory image behind it has never been written. This turns a
             bad update into a menu entry. Prototype.
 
+    config BLUERETRO_GC_SNIFF
+        bool "Listen to one GameCube port instead of answering on it"
+        default n
+        help
+            A capture build, not a shipping one. The chosen port stops
+            behaving like a controller entirely: it never transmits, and
+            every frame it hears goes into the debug capture bank as a
+            BT_MON_SI_FRAME record of [port][raw bytes].
+
+            SI is one open-drain wire, so a port that receives without ever
+            answering sees both halves of somebody else's conversation. It
+            exists to reverse engineer the GameCube to GBA link, where a
+            real link cable is in the port and the question is what the
+            console and the GBA actually say to each other.
+
+            The port is also forced to stay attached. Normally a port with a
+            real device in it is detached so that device can talk to the
+            console directly; here that would leave nothing to listen to.
+
+            One port only. The companion app is how the capture gets off the
+            adapter, and it needs some other port still answering the vendor
+            opcodes to do it.
+
+            Needs the debug bank selected, same as any other capture.
+
+    config BLUERETRO_GC_SNIFF_PORT
+        int "Which port to listen to"
+        depends on BLUERETRO_GC_SNIFF
+        range 0 3
+        default 0
+        help
+            Zero based, so 0 is the port marked 1 on the console.
+
     config BLUERETRO_GC_LOG
         bool "Download the Bluetooth debug log over the GameCube port"
         default n

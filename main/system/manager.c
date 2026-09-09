@@ -417,6 +417,14 @@ static void wired_port_hdl(void) {
         wired_bare_port_present(present_mask);
     }
 
+#ifdef CONFIG_BLUERETRO_GC_SNIFF
+    /* A port with a real device in it is normally detached so that device
+     * can talk to the console directly. The sniffer needs the opposite:
+     * attached, so the RMT hears them, and silent, which nsi.c handles. */
+    port_mask |= BIT(CONFIG_BLUERETRO_GC_SNIFF_PORT);
+    present_mask &= ~BIT(CONFIG_BLUERETRO_GC_SNIFF_PORT);
+#endif
+
     if (update && !mc_get_state()) {
         printf("# %s: Update ports state: %04X\n", __FUNCTION__, port_mask);
         wired_bare_port_cfg(port_mask);
