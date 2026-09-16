@@ -886,6 +886,15 @@ static void IRAM_ATTR gc_sniff_frame(uint8_t channel, uint8_t port) {
         bytes = GC_SNIFF_MAX;
     }
 
+    /* Whole bytes, give or take the stop bit the RMT counts as one more
+     * item. Nothing drives this port until the far end of the cable does,
+     * and an undriven one reads as noise at well over a kilohertz - almost
+     * none of which lands on a byte boundary. One compare, and the capture
+     * is mostly frames instead of mostly rubbish. */
+    if ((bits & 0x07) > 1) {
+        return;
+    }
+
     /* Port first, so a capture with more than one thing on the bus can
      * still be told apart when it is read back. */
     rec[0] = port;
