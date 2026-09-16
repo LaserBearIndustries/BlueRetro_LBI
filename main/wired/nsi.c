@@ -867,7 +867,7 @@ static void gc_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
 static inline uint32_t gc_sniff_bit_cnt(uint32_t item) {
     uint32_t n = 0;
 
-    while (n < RMT_MEM_ITEM_NUM && (rmt_items[item + n].val & 0x7FFF)) {
+    while (n < GC_SNIFF_MAX * 8 && (rmt_items[item + n].val & 0x7FFF)) {
         n++;
     }
     return n;
@@ -1311,6 +1311,16 @@ static unsigned gc_isr(unsigned cause) {
                  * then stay quiet, rather than turning a noisy line into a
                  * starved CPU. The count clears on the next good receive, so a
                  * channel that recovers can report again later. */
+#ifdef CONFIG_BLUERETRO_GC_SNIFF
+                /* Except on the sniffed port, where an error is the
+                 * normal condition rather than news: that port is driven
+                 * by whatever is on the far end of the cable and by
+                 * nothing at all until then. The recovery above still
+                 * runs; only the telling stops. */
+                if (port == GC_SNIFF_PORT) {
+                    break;
+                }
+#endif
                 if (rmt_err_cnt[channel] < 4) {
                     rmt_err_cnt[channel]++;
                     ets_printf("ERR ch%d\n", channel);
