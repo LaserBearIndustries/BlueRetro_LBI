@@ -164,3 +164,50 @@ Caveat worth keeping: this is one game and two minutes of one session. A busier
 moment - combat, an item changing hands, a screen transition - could spike, and
 the honest version of this claim is that it holds for what was on screen while
 the capture ran.
+
+---
+
+# Correction: the rates above are undercounts
+
+Everything in this document dated 17 September was measured from a capture that
+was quietly losing transactions, and the per-second figures are wrong by a
+factor of about 3.4. Recorded here rather than edited away, because the way it
+went wrong is worth knowing.
+
+The bus runs at **3,239 transactions/s**, which at ~110 bytes of capture per
+transaction is about 400 kB/s. The serial link carries 92 kB/s at 921600 baud.
+So the firmware dropped in long episodes, and only 387 records carried the drop
+flag because the flag marks an episode, not each record lost inside it.
+
+The giveaway was the spacing histogram: gaps between consecutive captured
+transactions cluster at 200-250us and 300-350us, which are exactly an ident
+transaction (151us of wire time) and a write transaction (247us) plus about
+75us of idle. Transactions run back to back. There is no inter-round idle for a
+960/s average to hide in, so the average had to be wrong.
+
+Measured instead from the 337 stretches that carry no drop flag, where every
+transaction that happened is present:
+
+| | first reported | actual |
+| --- | --- | --- |
+| ident | ~479/s | **1,615/s** |
+| write | ~461/s | **1,556/s, 6.2 kB/s** |
+| read | ~17.5/s | **60/s, 0.24 kB/s** |
+| writes per read | 26 | 26.1 |
+
+Scaling the rest by the same factor: about **1.2 kB/s** of genuinely changed
+content downstream rather than 356 B/s, and about **7 state changes/s** on the
+return channel rather than 2. Multiboot is bus limited rather than rate limited
+- writes back to back at 322us is 3,100/s, so **up to ~12 kB/s** at peak.
+
+What survives unchanged, because it is measured inside one transaction or is a
+ratio: the 6.5us turnaround, the cell widths per direction, the command set,
+the status toggle, the 26 frame cycle, the 39 value return channel, and the
+keepalive share. The frame sequence analysis also survives, because drops come
+in episodes rather than at random: inside a clean run of up to 458 records the
+write stream is contiguous, which is why a 26 frame period was visible at all.
+
+**Practical consequence: 921600 baud is not enough to capture this bus.** A
+complete capture needs about 400 kB/s, so at least 4 Mbaud, or fewer bytes per
+transaction on the wire. Any future session should raise the baud first and
+confirm the drop count is zero before trusting a rate.
