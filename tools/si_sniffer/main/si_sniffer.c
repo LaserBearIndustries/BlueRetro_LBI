@@ -62,6 +62,17 @@ static const uint8_t port_pin[4] = {19, 5, 26, 27};
 /* 0.5us per tick, as BlueRetro uses: 80MHz APB / 40. */
 #define SI_DIV_CNT 40
 
+/* The bus produces about 400kB/s of capture at 3239 transactions a second,
+ * so the serial link is the bottleneck, not the adapter. At 921600 baud,
+ * which carries 92kB/s, roughly seven transactions in ten were dropped - in
+ * long episodes, since the ring refills between them, which is why only the
+ * first record after each episode carries the drop flag.
+ *
+ * 2Mbaud is what this probe will take reliably. Still not the whole bus, but
+ * the clean stretches get much longer, and a rate measured inside one is
+ * trustworthy. Raise both this and sicap.py together. */
+#define SI_BAUD 2000000
+
 /* Idle gap that ends a capture, in ticks. A GameCube bit cell is 4us and the
  * turnaround between a request and its reply is a few us, so 30us keeps the
  * two halves of one transaction in a single capture - which is what makes the
@@ -304,7 +315,7 @@ void app_main(void) {
     esp_log_level_set("*", ESP_LOG_NONE);
 
     uart_config_t uart_cfg = {
-        .baud_rate = 921600,
+        .baud_rate = SI_BAUD,
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,

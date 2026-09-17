@@ -32,7 +32,8 @@ def main():
     # middle of a game is the one thing that ruins a capture.
     sp = serial.Serial()
     sp.port = port
-    sp.baudrate = 921600
+    # Must match SI_BAUD in main/si_sniffer.c.
+    sp.baudrate = 2000000
     sp.timeout = 0.2
     sp.dtr = False
     sp.rts = False
