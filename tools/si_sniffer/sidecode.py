@@ -22,7 +22,8 @@ import sys
 MAGIC = b'\xA5\x5A\x17\x53'
 HDR = 12
 CYCLES_PER_US = 240
-STOP_HIGH = 12          # ticks of 0.5us, so 6us
+STOP_HIGH = 10          # ticks, so 5us: measured cells top out at 4us,
+                        # turnarounds start at 5.5us, so this splits them
 
 CMDS = {
     0x00: 'ident/reset',
