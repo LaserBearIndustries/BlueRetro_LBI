@@ -103,3 +103,64 @@ Feasible, but only as a state caching bridge, never as a tunnel.
 The open question is no longer electrical or bandwidth. It is whether the
 game's own protocol tolerates its state being a hop stale - which needs the
 reconstructed payload streams read, not more capture.
+
+## Frame structure, and how much of it is actually new
+
+Each write moves four bytes. `siframes.py` concatenates them and looks for
+structure; 55,362 frames from the in-game capture.
+
+There is a **26 frame cycle**: 67.6% of frames equal the frame 26 later, 62.4%
+at 52. That number is not arbitrary - 461 writes/s over 17.7 reads/s is 26
+writes per read, so one round is 26 writes and one read, repeating 17.7 times a
+second.
+
+A round looks like this, and the shape is consistent:
+
+```
+00000010 67001850 6010BC4F              marker and header
+EC497800 EC5671F0 EC687100 EC7A7108     group, tag byte EC
+43677720 43557720 43437720 43367E20     group, tag byte 43
+00E08001 x6  00E08009  00E08001 ...     the rest of the round
+```
+
+Roughly ten frames of payload, then the balance filled with two near-identical
+keepalive frames - `00 E0 80 01` and `00 E0 80 09`, which differ in one bit and
+are 70% of the entire stream between them. The tagged groups repeat unchanged
+from one round to the next; only the marker frames vary.
+
+So the byte rate badly overstates the information rate:
+
+| | raw | actually new |
+| --- | --- | --- |
+| console to device | 1,845 B/s | **356 B/s** changed against the previous cycle |
+| keepalive share | | 71% of frames |
+| distinct frames | | 5,713 of 55,362, 10.3% |
+
+## The return channel is tiny, and that is the one that matters
+
+Only `14` read carries data a stand-in could not invent, so this is the
+direction that has to cross the radio. It is almost nothing:
+
+- 17.5 frames/s, 70 B/s raw
+- **39 distinct values, ever**, in 2,105 frames
+- 88.5% of frames repeat the frame before them, so about **two state changes a
+  second**
+
+All of the form `01 xx 80 yy`, with the top three by share being `01 00 80 4C`
+(33%), `01 80 80 55` (24%) and `01 40 80 A6` (18%).
+
+Two changes a second out of a 39 value alphabet. Being one radio hop stale
+means being tens of milliseconds behind a value that changes twice a second.
+
+## Where this leaves the project
+
+The staleness question is answered as far as this game and this session go. The
+forward direction is 71% keepalive and 356 B/s of real change; the return
+direction is 2 changes a second. Nothing here needs a round trip inside 6.5us -
+only the electrical reply does, and that is synthesised locally from cached
+state, which BlueRetro already does on a controller port.
+
+Caveat worth keeping: this is one game and two minutes of one session. A busier
+moment - combat, an item changing hands, a screen transition - could spike, and
+the honest version of this claim is that it holds for what was on screen while
+the capture ran.
